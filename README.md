@@ -7,8 +7,6 @@ Fichiers à utiliser :
 - `SimulationMoulageAuto_V2.html` : simulation
 - `moulage-nodered-flow-v2.json` : flux à importer dans Node-RED
 
-Les fichiers `SimulationMoulageAuto.html` et `moulage-nodered-flow.json` sont l'ancienne version. Ne pas les importer en même temps que la V2 : les deux flux écoutent le même chemin WebSocket `/ws/moulage`.
-
 ## Prérequis
 
 - [Node.js](https://nodejs.org/) (LTS)
@@ -44,7 +42,7 @@ node-red
 | État | Statut de la ligne, goulot d'emballage, mode Défi, alerte qualité |
 | Compteurs | Pièces totales, conformes, rebuts, pièces emballées |
 | Performance | Jauge TRS / OEE, jauge température moule, courbe du taux de rebut |
-| Commandes | Démarrer, Arrêter, Réinitialiser Sécurité, vitesse, température |
+| Commandes | Démarrer, Arrêter, Réinitialiser Sécurité, vitesse, température, téléchargement CSV |
 
 Le journal CSV est écrit ici :
 
@@ -52,7 +50,9 @@ Le journal CSV est écrit ici :
 
 Colonnes : `ID_Piece`, `Horodatage`, `Temp_Moule`, `Statut`, `Motif_Rebut`, `Emballe`.
 
-Si le projet n'est pas dans ce dossier sur ta machine, ouvre le nœud **Journal production V2** dans Node-RED et change le chemin du fichier avant de déployer.
+Si le projet n'est pas dans ce dossier sur ta machine, ouvre les nœuds **Journal production V2** et **Lire le journal CSV** dans Node-RED et change le chemin du fichier avant de déployer.
+
+Sur le dashboard, le bouton **Télécharger le CSV** du groupe Commandes récupère ce fichier. La même adresse fonctionne dans le navigateur : [http://127.0.0.1:1880/moulage/production.csv](http://127.0.0.1:1880/moulage/production.csv). Réimporte `moulage-nodered-flow-v2.json` puis **Deploy** si ce bouton n'apparaît pas encore.
 
 ## Commandes envoyées par le dashboard
 

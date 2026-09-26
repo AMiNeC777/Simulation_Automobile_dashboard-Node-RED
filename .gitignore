@@ -1,0 +1,6 @@
+# Historiques exportés par la simulation
+historique_moulage_*.csv
+
+# Sujet d'atelier et documents de prompts
+*.pdf
+*.docx
