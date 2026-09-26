@@ -1,0 +1,729 @@
+[
+    {
+        "id": "f20b000000000001",
+        "type": "tab",
+        "label": "Moulage V2",
+        "disabled": false,
+        "info": "Supervision de SimulationMoulageAuto_V2.html via WebSocket /ws/moulage.\n\nDésactiver l'onglet V1 avant déploiement : un seul listener est autorisé sur ce path.\nPrérequis : node-red-dashboard.\nJournal : C:/Master/M2/IOT/TP/Production/moulage_production_v2.csv"
+    },
+    {
+        "id": "c200000000000001",
+        "type": "websocket-listener",
+        "path": "/ws/moulage",
+        "wholemsg": "true"
+    },
+    {
+        "id": "d200000000000001",
+        "type": "ui_tab",
+        "name": "Moulage V2",
+        "icon": "dashboard",
+        "order": 1,
+        "disabled": false,
+        "hidden": false
+    },
+    {
+        "id": "d200000000000002",
+        "type": "ui_group",
+        "name": "État",
+        "tab": "d200000000000001",
+        "order": 1,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "d200000000000003",
+        "type": "ui_group",
+        "name": "Compteurs",
+        "tab": "d200000000000001",
+        "order": 2,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "d200000000000004",
+        "type": "ui_group",
+        "name": "Performance",
+        "tab": "d200000000000001",
+        "order": 3,
+        "disp": true,
+        "width": 12,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "d200000000000005",
+        "type": "ui_group",
+        "name": "Commandes",
+        "tab": "d200000000000001",
+        "order": 4,
+        "disp": true,
+        "width": 6,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "c200000000000002",
+        "type": "comment",
+        "z": "f20b000000000001",
+        "name": "Raccordement SimulationMoulageAuto_V2",
+        "info": "Dans la page, Connecter vers ws://127.0.0.1:1880/ws/moulage.\n\nEntrée : { type: moulage:piece | moulage:status, payload }.\nSortie : { action: START|STOP|RESET|SET_SPEED|SET_TEMP, value }.\n\nLa V2 traite START, STOP, RESET et SET_SPEED.\nSET_TEMP est émis par le slider ; la page ne l'applique que si Ws.handle appelle window.setTemp.\n\nLe statut filaire « Arrêt Sécurité » couvre aussi l'arrêt normal : le badge passe au rouge clignotant, comme pour Surchauffe et Arrêt Sécurité Qualité.\n\nJournal : C:/Master/M2/IOT/TP/Production/moulage_production_v2.csv\nPrérequis : node-red-dashboard. Désactiver le flux V1 (même path /ws/moulage).",
+        "x": 280,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "c200000000000003",
+        "type": "websocket in",
+        "z": "f20b000000000001",
+        "name": "WS moulage in",
+        "server": "c200000000000001",
+        "client": "",
+        "x": 170,
+        "y": 180,
+        "wires": [
+            [
+                "c200000000000004"
+            ]
+        ]
+    },
+    {
+        "id": "c200000000000004",
+        "type": "function",
+        "z": "f20b000000000001",
+        "name": "Normaliser le message",
+        "func": "let data = msg;\nif (!data.type && typeof data.payload === \"string\") {\n    try {\n        const parsed = JSON.parse(data.payload);\n        if (parsed && typeof parsed === \"object\") data = parsed;\n    } catch (e) {\n        return null;\n    }\n}\nif (!data.type && data.payload && typeof data.payload === \"object\" && data.payload.type) {\n    data = { type: data.payload.type, payload: data.payload.payload };\n}\nif (!data.type || data.payload == null || typeof data.payload !== \"object\") return null;\nmsg.type = data.type;\nmsg.payload = data.payload;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 180,
+        "wires": [
+            [
+                "c200000000000005"
+            ]
+        ]
+    },
+    {
+        "id": "c200000000000005",
+        "type": "switch",
+        "z": "f20b000000000001",
+        "name": "Type d'événement",
+        "property": "type",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "moulage:piece",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "moulage:status",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 680,
+        "y": 180,
+        "wires": [
+            [
+                "c200000000000006"
+            ],
+            [
+                "c200000000000007"
+            ]
+        ]
+    },
+    {
+        "id": "c200000000000006",
+        "type": "function",
+        "z": "f20b000000000001",
+        "name": "Traiter pièce",
+        "func": "const p = msg.payload || {};\nconst total = Number(p.totalCount) || 0;\nconst ok = Number(p.conformeCount) || 0;\nconst ko = Number(p.defectTotal) || 0;\nconst prevTotal = flow.get(\"totalCount\");\n\nlet packedIds = flow.get(\"packedIds\") || {};\nlet packedCount = Number(flow.get(\"packedCount\")) || 0;\n\nif (prevTotal != null && total < Number(prevTotal)) {\n    packedIds = {};\n    packedCount = 0;\n    flow.set(\"qualityAlert\", false);\n}\n\nconst pieceId = p.id != null && p.id !== \"\" ? String(p.id) : \"\";\nif (p.packed && pieceId && !packedIds[pieceId]) {\n    packedIds[pieceId] = true;\n    packedCount += 1;\n}\n\nflow.set(\"packedIds\", packedIds);\nflow.set(\"packedCount\", packedCount);\nflow.set(\"totalCount\", total);\nflow.set(\"conformeCount\", ok);\nflow.set(\"defectTotal\", ko);\n\nconst trs = total > 0 ? Math.round((ok / total) * 1000) / 10 : 0;\nconst temp = Number(p.temp);\nconst rateNum = Number(p.defectRate);\nconst rate = Number.isFinite(rateNum) ? rateNum : 0;\nconst status = p.status || \"\";\nconst motif = p.motif || (status === \"Non-Conforme\" ? \"Défaut simulé\" : \"\");\n\nconst row = {\n    ID_Piece: pieceId,\n    Horodatage: p.timestamp || \"\",\n    Temp_Moule: Number.isFinite(temp) ? temp : \"\",\n    Statut: status,\n    Motif_Rebut: motif,\n    Emballe: p.packed ? \"Oui\" : \"Non\"\n};\n\nconst alertOn = rate > 30;\nconst wasAlert = !!flow.get(\"qualityAlert\");\nflow.set(\"qualityAlert\", alertOn);\n\nreturn [\n    { payload: row },\n    { payload: total },\n    { payload: ok },\n    { payload: ko },\n    { payload: packedCount },\n    { payload: trs },\n    Number.isFinite(temp) ? { payload: temp } : null,\n    { payload: rate, topic: \"Taux de rebut\" },\n    { payload: alertOn ? \"Alerte Qualité Majeure\" : \"—\" },\n    (alertOn && !wasAlert) ? { payload: \"Alerte Qualité Majeure — taux de rebut \" + rate + \" %\" } : null\n];",
+        "outputs": 10,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 920,
+        "y": 120,
+        "wires": [
+            [
+                "c200000000000008"
+            ],
+            [
+                "d200000000000016"
+            ],
+            [
+                "d200000000000017"
+            ],
+            [
+                "d200000000000018"
+            ],
+            [
+                "d200000000000019"
+            ],
+            [
+                "d20000000000001a"
+            ],
+            [
+                "d20000000000001b"
+            ],
+            [
+                "d20000000000001c"
+            ],
+            [
+                "d200000000000014"
+            ],
+            [
+                "d200000000000015"
+            ]
+        ]
+    },
+    {
+        "id": "c200000000000007",
+        "type": "function",
+        "z": "f20b000000000001",
+        "name": "Traiter statut",
+        "func": "const p = msg.payload || {};\nconst status = p.status || \"—\";\nconst temp = Number(p.temp);\nconst critical = status === \"Surchauffe\" || status === \"Arrêt Sécurité Qualité\" || status === \"Arrêt Sécurité\";\n\nlet bg = \"#475569\";\nlet color = \"#f8fafc\";\nif (status === \"En Marche\") bg = \"#059669\";\nelse if (critical) {\n    bg = \"#dc2626\";\n    color = \"#ffffff\";\n}\n\nreturn [\n    { payload: status, flash: critical, bg: bg, color: color },\n    { payload: p.bottleneck === true ? \"Goulot d'Étranglement (Emballage Surchargé)\" : \"—\" },\n    { payload: p.challengeActive === true ? \"Mode Défi en Cours\" : \"—\" },\n    Number.isFinite(temp) ? { payload: temp } : null\n];",
+        "outputs": 4,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 920,
+        "y": 340,
+        "wires": [
+            [
+                "d200000000000011"
+            ],
+            [
+                "d200000000000012"
+            ],
+            [
+                "d200000000000013"
+            ],
+            [
+                "d20000000000001b"
+            ]
+        ]
+    },
+    {
+        "id": "c200000000000008",
+        "type": "csv",
+        "z": "f20b000000000001",
+        "name": "CSV pièce",
+        "spec": "rfc",
+        "sep": ";",
+        "hdrin": "",
+        "hdrout": "none",
+        "multi": "one",
+        "ret": "\\r\\n",
+        "temp": "ID_Piece,Horodatage,Temp_Moule,Statut,Motif_Rebut,Emballe",
+        "skip": "0",
+        "strings": true,
+        "include_empty_strings": true,
+        "include_null_values": true,
+        "x": 1120,
+        "y": 80,
+        "wires": [
+            [
+                "c200000000000009"
+            ]
+        ]
+    },
+    {
+        "id": "c200000000000009",
+        "type": "function",
+        "z": "f20b000000000001",
+        "name": "En-tête CSV une fois",
+        "func": "const line = typeof msg.payload === \"string\" ? msg.payload : String(msg.payload == null ? \"\" : msg.payload);\nif (!flow.get(\"csvHeaderWritten\")) {\n    flow.set(\"csvHeaderWritten\", true);\n    msg.payload = \"ID_Piece;Horodatage;Temp_Moule;Statut;Motif_Rebut;Emballe\\r\\n\" + line;\n} else {\n    msg.payload = line;\n}\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1340,
+        "y": 80,
+        "wires": [
+            [
+                "c20000000000000a"
+            ]
+        ]
+    },
+    {
+        "id": "c20000000000000a",
+        "type": "file",
+        "z": "f20b000000000001",
+        "name": "Journal production V2",
+        "filename": "C:/Master/M2/IOT/TP/Production/moulage_production_v2.csv",
+        "filenameType": "str",
+        "appendNewline": false,
+        "createDir": true,
+        "overwriteFile": "false",
+        "encoding": "utf8",
+        "x": 1580,
+        "y": 80,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "d200000000000011",
+        "type": "ui_template",
+        "z": "f20b000000000001",
+        "group": "d200000000000002",
+        "name": "État de la ligne",
+        "order": 1,
+        "width": 6,
+        "height": 2,
+        "format": "<div class=\"moulage-badge\" ng-class=\"{'is-flash': msg.flash}\" ng-style=\"{background: msg.bg || '#475569', color: msg.color || '#f8fafc'}\">{{msg.payload || '—'}}</div>\n<style>\n.moulage-badge { margin: 4px 0; padding: 10px 12px; border-radius: 8px; font-weight: 700; font-size: 18px; text-align: center; letter-spacing: 0.02em; }\n.moulage-badge.is-flash { animation: moulageFlash 0.7s linear infinite; }\n@keyframes moulageFlash { 50% { opacity: 0.35; } }\n</style>",
+        "storeOutMessages": true,
+        "fwdInMessages": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1280,
+        "y": 260,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "d200000000000012",
+        "type": "ui_text",
+        "z": "f20b000000000001",
+        "group": "d200000000000002",
+        "order": 2,
+        "width": 6,
+        "height": 1,
+        "name": "Goulot",
+        "label": "Goulot",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "fontSize": 14,
+        "color": "#e65100",
+        "className": "",
+        "x": 1240,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "d200000000000013",
+        "type": "ui_text",
+        "z": "f20b000000000001",
+        "group": "d200000000000002",
+        "order": 3,
+        "width": 6,
+        "height": 1,
+        "name": "Mode défi",
+        "label": "Défi",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "fontSize": 14,
+        "color": "#1565c0",
+        "className": "",
+        "x": 1250,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "d200000000000014",
+        "type": "ui_text",
+        "z": "f20b000000000001",
+        "group": "d200000000000002",
+        "order": 4,
+        "width": 6,
+        "height": 1,
+        "name": "Alerte qualité",
+        "label": "Qualité",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "fontSize": 16,
+        "color": "#b71c1c",
+        "className": "",
+        "x": 1260,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "d200000000000015",
+        "type": "ui_toast",
+        "z": "f20b000000000001",
+        "position": "top right",
+        "displayTime": "8",
+        "highlight": "#b71c1c",
+        "sendall": true,
+        "outputs": 0,
+        "ok": "OK",
+        "cancel": "",
+        "raw": false,
+        "className": "",
+        "topic": "",
+        "name": "Notification qualité",
+        "x": 1300,
+        "y": 460,
+        "wires": []
+    },
+    {
+        "id": "d200000000000016",
+        "type": "ui_text",
+        "z": "f20b000000000001",
+        "group": "d200000000000003",
+        "order": 1,
+        "width": 3,
+        "height": 1,
+        "name": "Pièces totales",
+        "label": "Pièces totales",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "fontSize": 16,
+        "color": "#212121",
+        "className": "",
+        "x": 1560,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "d200000000000017",
+        "type": "ui_text",
+        "z": "f20b000000000001",
+        "group": "d200000000000003",
+        "order": 2,
+        "width": 3,
+        "height": 1,
+        "name": "Conformes",
+        "label": "Conformes",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "fontSize": 16,
+        "color": "#1b5e20",
+        "className": "",
+        "x": 1740,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "d200000000000018",
+        "type": "ui_text",
+        "z": "f20b000000000001",
+        "group": "d200000000000003",
+        "order": 3,
+        "width": 3,
+        "height": 1,
+        "name": "Rebuts",
+        "label": "Rebuts",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "fontSize": 16,
+        "color": "#b71c1c",
+        "className": "",
+        "x": 1540,
+        "y": 230,
+        "wires": []
+    },
+    {
+        "id": "d200000000000019",
+        "type": "ui_text",
+        "z": "f20b000000000001",
+        "group": "d200000000000003",
+        "order": 4,
+        "width": 3,
+        "height": 1,
+        "name": "Pièces emballées",
+        "label": "Pièces emballées",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "fontSize": 16,
+        "color": "#0d47a1",
+        "className": "",
+        "x": 1760,
+        "y": 230,
+        "wires": []
+    },
+    {
+        "id": "d20000000000001a",
+        "type": "ui_gauge",
+        "z": "f20b000000000001",
+        "name": "TRS / OEE",
+        "group": "d200000000000004",
+        "order": 1,
+        "width": 6,
+        "height": 4,
+        "gtype": "gage",
+        "title": "TRS / OEE",
+        "label": "%",
+        "format": "{{value}}",
+        "min": 0,
+        "max": 100,
+        "colors": [
+            "#ca3838",
+            "#e6e600",
+            "#00b500"
+        ],
+        "seg1": 50,
+        "seg2": 80,
+        "diff": false,
+        "className": "",
+        "x": 1540,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "d20000000000001b",
+        "type": "ui_gauge",
+        "z": "f20b000000000001",
+        "name": "Température moule",
+        "group": "d200000000000004",
+        "order": 2,
+        "width": 6,
+        "height": 4,
+        "gtype": "gage",
+        "title": "Température moule",
+        "label": "°C",
+        "format": "{{value}}",
+        "min": 150,
+        "max": 250,
+        "colors": [
+            "#00b500",
+            "#ff9800",
+            "#ca3838"
+        ],
+        "seg1": 180,
+        "seg2": 220,
+        "diff": false,
+        "className": "",
+        "x": 1760,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "d20000000000001c",
+        "type": "ui_chart",
+        "z": "f20b000000000001",
+        "name": "Taux de rebut",
+        "group": "d200000000000004",
+        "order": 3,
+        "width": 12,
+        "height": 6,
+        "label": "Taux de rebut (%)",
+        "chartType": "line",
+        "legend": "false",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Aucune donnée",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "100",
+        "removeOlder": 30,
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#ff6384",
+            "#36a2eb",
+            "#ffce56",
+            "#4bc0c0",
+            "#9966ff",
+            "#ff9f40"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1640,
+        "y": 420,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "d20000000000001d",
+        "type": "ui_button",
+        "z": "f20b000000000001",
+        "name": "Démarrer",
+        "group": "d200000000000005",
+        "order": 1,
+        "width": 3,
+        "height": 1,
+        "passthru": false,
+        "label": "Démarrer",
+        "tooltip": "",
+        "color": "#ffffff",
+        "bgcolor": "#059669",
+        "className": "",
+        "icon": "",
+        "payload": "START",
+        "payloadType": "str",
+        "topic": "action",
+        "topicType": "str",
+        "x": 160,
+        "y": 460,
+        "wires": [
+            [
+                "c20000000000000b"
+            ]
+        ]
+    },
+    {
+        "id": "d20000000000001e",
+        "type": "ui_button",
+        "z": "f20b000000000001",
+        "name": "Arrêter",
+        "group": "d200000000000005",
+        "order": 2,
+        "width": 3,
+        "height": 1,
+        "passthru": false,
+        "label": "Arrêter",
+        "tooltip": "",
+        "color": "#1e293b",
+        "bgcolor": "#f59e0b",
+        "className": "",
+        "icon": "",
+        "payload": "STOP",
+        "payloadType": "str",
+        "topic": "action",
+        "topicType": "str",
+        "x": 160,
+        "y": 510,
+        "wires": [
+            [
+                "c20000000000000b"
+            ]
+        ]
+    },
+    {
+        "id": "d20000000000001f",
+        "type": "ui_button",
+        "z": "f20b000000000001",
+        "name": "Réinitialiser Sécurité",
+        "group": "d200000000000005",
+        "order": 3,
+        "width": 6,
+        "height": 1,
+        "passthru": false,
+        "label": "Réinitialiser Sécurité",
+        "tooltip": "",
+        "color": "#ffffff",
+        "bgcolor": "#475569",
+        "className": "",
+        "icon": "",
+        "payload": "RESET",
+        "payloadType": "str",
+        "topic": "action",
+        "topicType": "str",
+        "x": 190,
+        "y": 560,
+        "wires": [
+            [
+                "c20000000000000b"
+            ]
+        ]
+    },
+    {
+        "id": "d200000000000020",
+        "type": "ui_slider",
+        "z": "f20b000000000001",
+        "name": "Vitesse convoyeur",
+        "label": "Vitesse convoyeur",
+        "tooltip": "",
+        "group": "d200000000000005",
+        "order": 4,
+        "width": 6,
+        "height": 1,
+        "passthru": false,
+        "outs": "all",
+        "topic": "SET_SPEED",
+        "topicType": "str",
+        "min": 10,
+        "max": 100,
+        "step": 1,
+        "className": "",
+        "x": 180,
+        "y": 610,
+        "wires": [
+            [
+                "c20000000000000b"
+            ]
+        ]
+    },
+    {
+        "id": "d200000000000021",
+        "type": "ui_slider",
+        "z": "f20b000000000001",
+        "name": "Température moule",
+        "label": "Température moule",
+        "tooltip": "",
+        "group": "d200000000000005",
+        "order": 5,
+        "width": 6,
+        "height": 1,
+        "passthru": false,
+        "outs": "all",
+        "topic": "SET_TEMP",
+        "topicType": "str",
+        "min": 150,
+        "max": 250,
+        "step": 1,
+        "className": "",
+        "x": 180,
+        "y": 660,
+        "wires": [
+            [
+                "c20000000000000b"
+            ]
+        ]
+    },
+    {
+        "id": "c20000000000000b",
+        "type": "function",
+        "z": "f20b000000000001",
+        "name": "Commande JSON",
+        "func": "let action = null;\nlet value = null;\n\nif (msg.topic === \"SET_SPEED\" || msg.topic === \"SET_TEMP\") {\n    action = msg.topic;\n    value = Math.round(Number(msg.payload));\n    if (!Number.isFinite(value)) return null;\n    if (action === \"SET_SPEED\") value = Math.min(100, Math.max(10, value));\n    if (action === \"SET_TEMP\") value = Math.min(250, Math.max(150, value));\n} else if (typeof msg.payload === \"string\" && msg.payload) {\n    action = msg.payload;\n} else if (msg.action) {\n    action = msg.action;\n    if (msg.value != null) value = msg.value;\n}\n\nif (!action) return null;\n\nconst out = { action: action, payload: { action: action } };\nif (value != null && Number.isFinite(Number(value))) {\n    out.value = Number(value);\n    out.payload.value = Number(value);\n}\nreturn out;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 460,
+        "y": 560,
+        "wires": [
+            [
+                "c20000000000000c"
+            ]
+        ]
+    },
+    {
+        "id": "c20000000000000c",
+        "type": "websocket out",
+        "z": "f20b000000000001",
+        "name": "WS moulage out",
+        "server": "c200000000000001",
+        "client": "",
+        "x": 720,
+        "y": 560,
+        "wires": []
+    }
+]

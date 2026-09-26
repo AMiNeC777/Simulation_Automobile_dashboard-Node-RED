@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simulation Moulage Automobile</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0.35rem 0.9rem;
+      font-weight: 700;
+      background: #334155;
+      color: #f8fafc;
+    }
+    .badge[data-status="running"] { background: #059669; }
+    .badge[data-status="paused"] { background: #f59e0b; color: #0f172a; }
+    .badge[data-status="overheat"] { background: #dc2626; }
+    .badge[data-status="quality_stop"] { background: #ea580c; }
+    .badge[data-status="emergency"] { background: #991b1b; box-shadow: 0 0 0 2px #fecaca; }
+    .chip {
+      border-radius: 999px;
+      padding: 0.2rem 0.7rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+    }
+    .chip.is-on[data-kind="running"] { background: #059669; color: #fff; border-color: #059669; }
+    .chip.is-on[data-kind="paused"] { background: #f59e0b; color: #0f172a; border-color: #f59e0b; }
+    .chip.is-on[data-kind="overheat"] { background: #dc2626; color: #fff; border-color: #dc2626; }
+    .chip.is-on[data-kind="quality"] { background: #ea580c; color: #fff; border-color: #ea580c; }
+    #synoptic-card.is-alarm { box-shadow: 0 0 0 2px #dc2626; }
+    #synoptic-card.is-hot { box-shadow: 0 0 0 2px #f97316; }
+    #temp-hint.is-hot-text { color: #f87171; font-weight: 600; }
+    input[type="range"] { accent-color: #38bdf8; width: 100%; }
+    #history-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    #history-table th, #history-table td {
+      text-align: left;
+      padding: 0.45rem 0.65rem;
+      border-bottom: 1px solid #1e293b;
+      white-space: nowrap;
+    }
+    #history-table th {
+      position: sticky;
+      top: 0;
+      background: #0f172a;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+    #history-table td:first-child { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    #history-table tr.row-ok td:nth-child(4) { color: #6ee7b7; }
+    #history-table tr.row-ko td:nth-child(4) { color: #fda4af; }
+    #history-table tr.row-empty td { color: #64748b; }
+    .swatch {
+      display: inline-block;
+      width: 0.7rem;
+      height: 0.7rem;
+      border-radius: 2px;
+      margin-right: 0.35rem;
+      vertical-align: -1px;
+    }
+    .swatch-raw { background: #e2e8f0; }
+    .swatch-ok { background: #4ade80; }
+    .swatch-ko { background: #fb7185; }
+    #ws-dot {
+      width: 0.65rem;
+      height: 0.65rem;
+      border-radius: 999px;
+      background: #64748b;
+      display: inline-block;
+    }
+    #ws-dot[data-ws="open"] { background: #22c55e; }
+    #ws-dot[data-ws="connecting"] { background: #f59e0b; }
+    #ws-dot[data-ws="error"] { background: #ef4444; }
+    #ws-dot[data-ws="closed"] { background: #64748b; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <div class="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
+    <header class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Simulation de moulage automobile</h1>
+        <p class="text-sm text-slate-400">Ligne d'injection, contrôle qualité et rebut. Données prêtes pour un WebSocket Node-RED.</p>
+      </div>
+      <div id="badge-status" class="badge" data-status="ready" aria-live="polite">Prête</div>
+    </header>
+
+    <div class="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <section id="synoptic-card" class="rounded-xl border border-slate-800 bg-slate-900 p-3">
+        <svg id="synoptic" viewBox="0 0 1080 520" class="pointer-events-none h-auto w-full" role="img" aria-label="Synoptique de la ligne de moulage automobile">
+          <rect x="0" y="0" width="1080" height="520" fill="#020617" />
+          <rect x="0" y="468" width="1080" height="52" fill="#0f172a" />
+          <text x="540" y="32" text-anchor="middle" font-size="18" fill="#f8fafc" font-family="ui-sans-serif, system-ui, sans-serif">Ligne de moulage — injecteurs automobiles</text>
+
+          <g id="press">
+            <rect x="34" y="124" width="18" height="292" fill="#334155" />
+            <rect x="198" y="124" width="18" height="292" fill="#334155" />
+            <rect x="40" y="416" width="16" height="52" fill="#1e293b" />
+            <rect x="194" y="416" width="16" height="52" fill="#1e293b" />
+            <rect x="26" y="124" width="198" height="22" fill="#475569" />
+            <rect x="22" y="390" width="206" height="26" rx="2" fill="#334155" />
+            <rect x="104" y="78" width="42" height="12" rx="2" fill="#94a3b8" />
+            <rect x="90" y="88" width="70" height="44" rx="4" fill="#64748b" />
+            <rect id="press-rod" x="118" y="132" width="14" height="44" fill="#e2e8f0" />
+            <g id="upper-mold">
+              <rect x="60" y="176" width="132" height="14" fill="#64748b" />
+              <rect id="mold-upper-body" x="74" y="190" width="104" height="50" rx="2" fill="#38bdf8" />
+              <path d="M90,220 H162 V240 H90 Z" fill="#082f49" />
+              <circle cx="86" cy="208" r="4" fill="#cbd5e1" />
+              <circle cx="166" cy="208" r="4" fill="#cbd5e1" />
+            </g>
+            <g id="lower-mold">
+              <rect id="mold-lower-body" x="74" y="300" width="104" height="50" rx="2" fill="#38bdf8" />
+              <path d="M90,300 H162 V320 H90 Z" fill="#082f49" />
+              <circle cx="86" cy="328" r="4" fill="#082f49" />
+              <circle cx="166" cy="328" r="4" fill="#082f49" />
+              <rect x="60" y="350" width="132" height="14" fill="#64748b" />
+            </g>
+            <rect x="180" y="294" width="60" height="8" fill="#475569" />
+            <rect x="186" y="286" width="28" height="16" rx="2" fill="#b45309" />
+            <rect id="inject-glow" x="158" y="294" width="28" height="8" fill="#fbbf24" opacity="0.08" />
+            <circle id="temp-led" cx="43" cy="168" r="7" fill="#38bdf8" />
+            <text id="temp-readout" x="64" y="172" font-size="12" fill="#e2e8f0" font-family="ui-sans-serif, system-ui, sans-serif">185 °C</text>
+            <text id="mold-state" x="40" y="112" font-size="12" fill="#94a3b8" font-family="ui-sans-serif, system-ui, sans-serif">Moule ouvert</text>
+          </g>
+
+          <g id="conveyor">
+            <rect x="236" y="292" width="680" height="6" fill="#334155" />
+            <rect x="236" y="298" width="680" height="20" fill="#0b1220" />
+            <g id="belt-stripes"></g>
+            <rect x="236" y="318" width="680" height="8" fill="#475569" />
+            <g id="rollers"></g>
+            <text x="520" y="360" font-size="12" fill="#94a3b8" font-family="ui-sans-serif, system-ui, sans-serif">Sens du convoyeur →</text>
+          </g>
+
+          <g id="bin-scrap">
+            <path d="M648,368 H812 L796,468 H664 Z" fill="#450a0a" stroke="#fb7185" stroke-width="2" />
+            <text x="730" y="392" text-anchor="middle" font-size="12" fill="#fecdd3" font-family="ui-sans-serif, system-ui, sans-serif">Rebut / Défauts</text>
+            <g id="scrap-minis"></g>
+            <text id="scrap-count" x="730" y="452" text-anchor="middle" font-size="18" fill="#fff1f2" font-family="ui-sans-serif, system-ui, sans-serif">0</text>
+          </g>
+
+          <g id="bin-ok">
+            <path d="M928,328 H1062 L1046,468 H944 Z" fill="#022c22" stroke="#34d399" stroke-width="2" />
+            <text x="995" y="356" text-anchor="middle" font-size="12" fill="#a7f3d0" font-family="ui-sans-serif, system-ui, sans-serif">Conformes</text>
+            <g id="ok-minis"></g>
+            <text id="ok-count" x="995" y="452" text-anchor="middle" font-size="18" fill="#ecfdf5" font-family="ui-sans-serif, system-ui, sans-serif">0</text>
+          </g>
+
+          <g id="parts-layer"></g>
+
+          <g id="sensor">
+            <text id="sensor-result" x="470" y="168" font-size="12" fill="#4ade80" font-family="ui-sans-serif, system-ui, sans-serif"></text>
+            <text x="470" y="184" font-size="12" fill="#cbd5e1" font-family="ui-sans-serif, system-ui, sans-serif">Contrôle qualité</text>
+            <rect x="528" y="190" width="54" height="20" rx="3" fill="#475569" />
+            <circle id="sensor-led" cx="555" cy="200" r="6" fill="#166534" />
+            <rect x="548" y="210" width="14" height="88" fill="#334155" />
+            <rect id="sensor-beam" x="551" y="214" width="8" height="84" fill="#4ade80" opacity="0.12" />
+          </g>
+
+          <g id="pusher">
+            <text x="688" y="164" font-size="12" fill="#cbd5e1" font-family="ui-sans-serif, system-ui, sans-serif">Poussoir</text>
+            <rect x="688" y="176" width="58" height="32" rx="4" fill="#64748b" />
+            <rect x="702" y="170" width="30" height="8" rx="2" fill="#94a3b8" />
+            <rect id="pusher-rod" x="709" y="208" width="16" height="22" fill="#e2e8f0" />
+            <rect id="pusher-pad" x="697" y="230" width="40" height="8" rx="2" fill="#cbd5e1" />
+          </g>
+        </svg>
+        <div class="mt-2 flex flex-wrap gap-4 px-1 text-xs text-slate-400">
+          <span><i class="swatch swatch-raw"></i>En transfert</span>
+          <span><i class="swatch swatch-ok"></i>Conforme</span>
+          <span><i class="swatch swatch-ko"></i>Non conforme</span>
+        </div>
+      </section>
+
+      <aside class="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4">
+        <div class="flex flex-wrap gap-2">
+          <div id="chip-running" class="chip" data-kind="running">En marche</div>
+          <div id="chip-paused" class="chip" data-kind="paused">En pause</div>
+          <div id="chip-overheat" class="chip" data-kind="overheat">Surchauffe</div>
+          <div id="chip-quality" class="chip" data-kind="quality">Arrêt Sécurité Qualité</div>
+        </div>
+        <p id="line-message" class="min-h-[2.5rem] text-sm text-slate-300" aria-live="polite">En attente de démarrage.</p>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btn-start" type="button" class="rounded-md bg-emerald-600 px-3 py-2 font-medium hover:bg-emerald-500 disabled:opacity-40">Démarrer</button>
+          <button id="btn-pause" type="button" class="rounded-md bg-amber-500 px-3 py-2 font-medium text-slate-950 hover:bg-amber-400 disabled:opacity-40">Pause</button>
+          <button id="btn-stop" type="button" class="col-span-2 rounded-md bg-red-600 px-3 py-2 font-semibold hover:bg-red-500">Arrêt d'urgence</button>
+          <button id="btn-reset" type="button" class="col-span-2 rounded-md bg-slate-700 px-3 py-2 font-medium hover:bg-slate-600">Réinitialiser</button>
+        </div>
+
+        <label class="block text-sm">
+          <span class="mb-1 flex justify-between text-slate-300"><span>Vitesse du convoyeur</span><span id="out-speed">5</span></span>
+          <input id="slider-speed" type="range" min="1" max="10" step="1" value="5" />
+        </label>
+        <label class="block text-sm">
+          <span class="mb-1 flex justify-between text-slate-300"><span>Taux de défauts (%)</span><span id="out-defect">15</span></span>
+          <input id="slider-defect" type="range" min="0" max="100" step="1" value="15" />
+        </label>
+        <label class="block text-sm">
+          <span class="mb-1 flex justify-between text-slate-300"><span>Température de la presse (°C)</span><span id="out-temp">185</span></span>
+          <input id="slider-temp" type="range" min="150" max="250" step="1" value="185" />
+        </label>
+        <p id="temp-hint" class="text-xs text-slate-400">Seuil d'arrêt : 220 °C.</p>
+
+        <dl class="grid grid-cols-2 gap-2 text-sm">
+          <div class="rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">Moulées</dt><dd id="stat-molded" class="text-lg font-semibold">0</dd></div>
+          <div class="rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">Sur la ligne</dt><dd id="stat-line" class="text-lg font-semibold">0</dd></div>
+          <div class="rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">Conformes</dt><dd id="stat-ok" class="text-lg font-semibold text-emerald-300">0</dd></div>
+          <div class="rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">Rebuts</dt><dd id="stat-ko" class="text-lg font-semibold text-rose-300">0</dd></div>
+          <div class="col-span-2 rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">Défauts consécutifs</dt><dd id="stat-consecutive" class="text-lg font-semibold">0 / 3</dd></div>
+        </dl>
+      </aside>
+    </div>
+
+    <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">Traçabilité</h2>
+          <p class="text-sm text-slate-400">Horodatage enregistré au passage du capteur.</p>
+        </div>
+        <button id="btn-export" type="button" class="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium hover:bg-sky-500">Exporter l'historique en CSV</button>
+      </div>
+      <div class="mb-3 flex flex-wrap items-center gap-4 text-sm">
+        <label class="flex items-center gap-2">
+          <input id="export-auto" type="checkbox" class="h-4 w-4 accent-sky-500" />
+          Export automatique
+        </label>
+        <label class="flex items-center gap-2">
+          Toutes les
+          <input id="export-minutes" type="number" min="1" max="120" step="1" value="5" class="w-16 rounded-md border border-slate-700 bg-slate-950 px-2 py-1" />
+          minutes
+        </label>
+        <span id="export-countdown" class="text-slate-400">Export automatique inactif</span>
+      </div>
+      <p id="export-status" class="mb-3 min-h-[1.25rem] text-sm text-slate-400"></p>
+      <div class="max-h-80 overflow-auto rounded-md border border-slate-800">
+        <table id="history-table">
+          <thead>
+            <tr>
+              <th>ID_Piece</th>
+              <th>Horodatage</th>
+              <th>Temp_Moule</th>
+              <th>Statut</th>
+              <th>Motif_Rebut</th>
+            </tr>
+          </thead>
+          <tbody id="history-body">
+            <tr class="row-empty"><td colspan="5">Aucune pièce inspectée.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <h2 class="text-lg font-semibold">WebSocket Node-RED</h2>
+      <p class="mb-3 text-sm text-slate-400">La ligne émet <span class="font-mono text-slate-300">moulage:piece</span> et <span class="font-mono text-slate-300">moulage:status</span>. Connexion optionnelle.</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <span id="ws-dot" data-ws="closed" aria-hidden="true"></span>
+        <input id="ws-url" type="text" spellcheck="false" value="ws://127.0.0.1:1880/ws/moulage" class="min-w-[16rem] flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm" />
+        <button id="btn-ws" type="button" class="rounded-md bg-slate-700 px-3 py-2 text-sm font-medium hover:bg-slate-600">Connecter</button>
+      </div>
+      <p id="ws-state" class="mt-2 text-sm text-slate-400">Déconnecté</p>
+      <details class="mt-3 text-sm text-slate-400">
+        <summary class="cursor-pointer text-slate-300">API console et commandes entrantes</summary>
+        <pre class="mt-2 overflow-auto rounded-md bg-slate-950 p-3 text-xs leading-relaxed text-slate-300">window.startLine()
+window.pauseLine()
+window.stopLine()
+window.resetLine()
+window.setSpeed(val)          // 1 à 10
+window.setDefectRate(val)     // 0 à 100
+window.setTemperature(val)    // 150 à 250
+window.getHistory()
+window.getLineState()
+window.exportHistory()
+window.connectWebSocket(url)
+window.disconnectWebSocket()
+
+Événement pièce : { id, timestamp, status, temp, motif }
+Événement statut : { status, temp, speed, reason }
+Trame WebSocket : { "type": "moulage:piece"|"moulage:status", "payload": { ... } }
+
+Commande entrante : { "cmd": "start|pause|stop|reset|export|setSpeed|setDefectRate|setTemperature", "value": 0 }</pre>
+      </details>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var SVG_NS = 'http://www.w3.org/2000/svg';
+      var TEMP_LIMIT = 220;
+      var DEFECT_LIMIT = 3;
+      var INJECTOR_D = 'M1,7 H14 L18,3 H31 L36,7 H45 V15 H36 L31,19 H18 L14,15 H1 Z';
+
+      var Layout = {
+        spawnX: 240,
+        partW: 46,
+        partH: 19,
+        partY: 279,
+        sensorX: 532,
+        pusherX: 694,
+        beltEnd: 900,
+        beltLeft: 236,
+        beltRight: 916,
+        moldTravel: 60,
+        rodOpen: 44,
+        pusherRodY: 208,
+        pusherRodOpen: 22,
+        pusherPadOpen: 230,
+        pusherStroke: 49
+      };
+
+      var STATUS_LABEL = {
+        ready: 'Prête',
+        running: 'En marche',
+        paused: 'En pause',
+        overheat: 'Surchauffe',
+        quality_stop: 'Arrêt Sécurité Qualité',
+        emergency: "Arrêt d'urgence"
+      };
+
+      var MESSAGES = {
+        'démarrage': 'Ligne en marche.',
+        'reprise': 'Ligne reprise.',
+        'pause': 'Ligne en pause.',
+        'arrêt urgence': "Arrêt d'urgence. Réinitialiser pour acquitter.",
+        'réinitialisation': 'Ligne réinitialisée. Historique effacé.',
+        'surchauffe': 'Arrêt automatique : température supérieure à 220 °C.',
+        '3 défauts consécutifs': 'Arrêt sécurité qualité : 3 non-conformes consécutives.'
+      };
+
+      var State = {
+        status: 'ready',
+        speed: 5,
+        defectRate: 15,
+        temp: 185,
+        consecutive: 0,
+        molded: 0,
+        conform: 0,
+        scrap: 0,
+        inOk: 0,
+        inScrap: 0,
+        cycleT: 0,
+        phase: 0,
+        spawned: false,
+        beltShift: 0,
+        clock: 0,
+        flash: 0,
+        flashText: '',
+        flashColor: '#4ade80',
+        message: 'En attente de démarrage.',
+        hudDirty: true
+      };
+
+      var el = {};
+
+      function requireEl(id) {
+        var node = document.getElementById(id);
+        if (!node) throw new Error('Élément manquant : #' + id);
+        return node;
+      }
+
+      function clamp(value, min, max) {
+        var n = Number(value);
+        if (!isFinite(n)) return null;
+        return Math.min(max, Math.max(min, n));
+      }
+
+      function beltSpeed() {
+        return 32 + State.speed * 16;
+      }
+
+      function cycleLength() {
+        return 4.8 - State.speed * 0.3;
+      }
+
+      function moldOpenRatio(p) {
+        if (p < 0.3) return 1 - p / 0.3;
+        if (p < 0.48) return 0;
+        if (p < 0.72) return (p - 0.48) / 0.24;
+        return 1;
+      }
+
+      function tempColor(temp) {
+        if (temp > TEMP_LIMIT) return '#ef4444';
+        if (temp >= 200) return '#f59e0b';
+        return '#38bdf8';
+      }
+
+      function allowsReject() {
+        return State.status === 'running' || State.status === 'overheat' || State.status === 'quality_stop';
+      }
+
+      function moldLabel(p) {
+        if (State.status !== 'running' && State.cycleT === 0) return 'Moule ouvert';
+        if (p < 0.3) return 'Fermeture';
+        if (p < 0.48) return 'Injection';
+        if (p < 0.72) return 'Ouverture';
+        return 'Éjection';
+      }
+
+      var Bus = {
+        emit: function (type, payload) {
+          var detail = JSON.parse(JSON.stringify(payload));
+          window.dispatchEvent(new CustomEvent(type, { detail: detail }));
+          WsBridge.forward(type, detail);
+        }
+      };
+
+      function setStatus(next, reason) {
+        var changed = State.status !== next;
+        State.status = next;
+        if (reason && MESSAGES[reason]) State.message = MESSAGES[reason];
+        State.hudDirty = true;
+        if (changed) {
+          Bus.emit('moulage:status', {
+            status: STATUS_LABEL[next],
+            temp: State.temp,
+            speed: State.speed,
+            reason: reason
+          });
+        }
+      }
+
+      var History = {
+        rows: [],
+        add: function (part) {
+          this.rows.push({
+            id: part.id,
+            timestamp: part.timestamp,
+            temp: part.temp,
+            status: part.status,
+            motif: part.motif
+          });
+          State.hudDirty = true;
+        },
+        clear: function () {
+          this.rows = [];
+          State.hudDirty = true;
+        }
+      };
+
+      var WsBridge = {
+        socket: null,
+        forward: function (type, payload) {
+          var socket = this.socket;
+          if (!socket || socket.readyState !== WebSocket.OPEN) return;
+          try {
+            socket.send(JSON.stringify({ type: type, payload: payload }));
+          } catch (err) {
+            /* Le serveur peut être absent : la simulation continue. */
+          }
+        },
+        handleIncoming: function (raw) {
+          var msg;
+          try {
+            msg = JSON.parse(raw);
+          } catch (err) {
+            msg = { cmd: String(raw) };
+          }
+          if (!msg || typeof msg !== 'object') return;
+          var cmd = msg.cmd || msg.command;
+          var value = msg.value;
+          if (cmd === 'start') window.startLine();
+          else if (cmd === 'pause') window.pauseLine();
+          else if (cmd === 'stop') window.stopLine();
+          else if (cmd === 'reset') window.resetLine();
+          else if (cmd === 'export') window.exportHistory();
+          else if (cmd === 'setSpeed') window.setSpeed(value);
+          else if (cmd === 'setDefectRate') window.setDefectRate(value);
+          else if (cmd === 'setTemperature') window.setTemperature(value);
+        }
+      };
+
+      function createInjector() {
+        var g = document.createElementNS(SVG_NS, 'g');
+        var body = document.createElementNS(SVG_NS, 'path');
+        body.setAttribute('d', INJECTOR_D);
+        body.setAttribute('fill', '#e2e8f0');
+        body.setAttribute('stroke', '#0f172a');
+        body.setAttribute('stroke-width', '1');
+        var eye = document.createElementNS(SVG_NS, 'circle');
+        eye.setAttribute('cx', '10');
+        eye.setAttribute('cy', '11');
+        eye.setAttribute('r', '2.4');
+        eye.setAttribute('fill', '#0f172a');
+        g.appendChild(body);
+        g.appendChild(eye);
+        return { g: g, body: body };
+      }
+
+      var Renderer = {
+        stripes: [],
+        rollers: [],
+        scrapIcons: [],
+        okIcons: [],
+        init: function () {
+          var span = Layout.beltRight - Layout.beltLeft;
+          var pitch = 28;
+          var count = Math.ceil(span / pitch);
+          var i;
+          for (i = 0; i < count; i += 1) {
+            var stripe = document.createElementNS(SVG_NS, 'rect');
+            stripe.setAttribute('y', '302');
+            stripe.setAttribute('height', '12');
+            stripe.setAttribute('fill', '#334155');
+            el.beltStripes.appendChild(stripe);
+            this.stripes.push(stripe);
+          }
+          for (var x = 258; x <= 890; x += 46) {
+            var g = document.createElementNS(SVG_NS, 'g');
+            var c = document.createElementNS(SVG_NS, 'circle');
+            c.setAttribute('cx', String(x));
+            c.setAttribute('cy', '335');
+            c.setAttribute('r', '9');
+            c.setAttribute('fill', '#1e293b');
+            c.setAttribute('stroke', '#94a3b8');
+            c.setAttribute('stroke-width', '2');
+            var spoke = document.createElementNS(SVG_NS, 'rect');
+            spoke.setAttribute('x', String(x - 1.5));
+            spoke.setAttribute('y', '328');
+            spoke.setAttribute('width', '3');
+            spoke.setAttribute('height', '14');
+            spoke.setAttribute('fill', '#e2e8f0');
+            g.appendChild(c);
+            g.appendChild(spoke);
+            el.rollers.appendChild(g);
+            this.rollers.push({ g: g, x: x });
+          }
+        },
+        createPart: function () {
+          return createInjector();
+        },
+        clearParts: function () {
+          el.partsLayer.textContent = '';
+        },
+        clearBins: function () {
+          this.scrapIcons = [];
+          this.okIcons = [];
+          el.scrapMinis.textContent = '';
+          el.okMinis.textContent = '';
+        },
+        pushMini: function (dest) {
+          var bucket = dest === 'scrap' ? this.scrapIcons : this.okIcons;
+          bucket.push(dest);
+          while (bucket.length > 8) bucket.shift();
+          this.drawMinis(dest);
+        },
+        drawMinis: function (dest) {
+          var g = dest === 'scrap' ? el.scrapMinis : el.okMinis;
+          var icons = dest === 'scrap' ? this.scrapIcons : this.okIcons;
+          var originX = dest === 'scrap' ? 668 : 956;
+          var originY = dest === 'scrap' ? 404 : 392;
+          var fill = dest === 'scrap' ? '#fb7185' : '#4ade80';
+          g.textContent = '';
+          for (var i = 0; i < icons.length; i += 1) {
+            var built = createInjector();
+            built.body.setAttribute('fill', fill);
+            var col = i % 4;
+            var row = Math.floor(i / 4);
+            built.g.setAttribute('transform', 'translate(' + (originX + col * 30) + ',' + (originY + row * 14) + ') scale(0.48)');
+            g.appendChild(built.g);
+          }
+        },
+        setWs: function (mode) {
+          var labels = {
+            closed: 'Déconnecté',
+            connecting: 'Connexion en cours…',
+            open: 'Connecté',
+            error: 'Serveur injoignable. La simulation continue.'
+          };
+          el.wsDot.setAttribute('data-ws', mode);
+          el.wsState.textContent = labels[mode] || labels.closed;
+          el.btnWs.textContent = (mode === 'open' || mode === 'connecting') ? 'Déconnecter' : 'Connecter';
+        },
+        syncHud: function () {
+          if (!State.hudDirty) return;
+          State.hudDirty = false;
+          el.badge.dataset.status = State.status;
+          el.badge.textContent = STATUS_LABEL[State.status];
+          el.chipRunning.classList.toggle('is-on', State.status === 'running');
+          el.chipPaused.classList.toggle('is-on', State.status === 'paused');
+          el.chipOverheat.classList.toggle('is-on', State.status === 'overheat' || State.temp > TEMP_LIMIT);
+          el.chipQuality.classList.toggle('is-on', State.status === 'quality_stop');
+          el.card.classList.toggle('is-alarm', State.status === 'emergency' || State.status === 'quality_stop');
+          el.card.classList.toggle('is-hot', State.status === 'overheat');
+          el.message.textContent = State.message;
+          el.btnStart.disabled = State.status === 'running' || State.status === 'emergency' || State.status === 'quality_stop';
+          el.btnPause.disabled = State.status !== 'running';
+          el.sliderSpeed.value = String(State.speed);
+          el.sliderDefect.value = String(State.defectRate);
+          el.sliderTemp.value = String(State.temp);
+          el.outSpeed.textContent = String(State.speed);
+          el.outDefect.textContent = String(State.defectRate);
+          el.outTemp.textContent = String(State.temp);
+          el.tempHint.textContent = State.temp > TEMP_LIMIT
+            ? 'Seuil dépassé : arrêt automatique au-dessus de 220 °C.'
+            : "Seuil d'arrêt : 220 °C.";
+          el.tempHint.classList.toggle('is-hot-text', State.temp > TEMP_LIMIT);
+          el.statMolded.textContent = String(State.molded);
+          el.statLine.textContent = String(Parts.list.length);
+          el.statOk.textContent = String(State.conform);
+          el.statKo.textContent = String(State.scrap);
+          el.statConsecutive.textContent = State.consecutive + ' / ' + DEFECT_LIMIT;
+          el.scrapCount.textContent = String(State.inScrap);
+          el.okCount.textContent = String(State.inOk);
+          this.renderTable();
+        },
+        renderTable: function () {
+          var body = el.historyBody;
+          body.textContent = '';
+          if (!History.rows.length) {
+            var empty = document.createElement('tr');
+            empty.className = 'row-empty';
+            var td = document.createElement('td');
+            td.colSpan = 5;
+            td.textContent = 'Aucune pièce inspectée.';
+            empty.appendChild(td);
+            body.appendChild(empty);
+            return;
+          }
+          for (var i = History.rows.length - 1; i >= 0; i -= 1) {
+            var row = History.rows[i];
+            var tr = document.createElement('tr');
+            tr.className = row.status === 'Non-Conforme' ? 'row-ko' : 'row-ok';
+            var values = [row.id, row.timestamp, row.temp, row.status, row.motif];
+            for (var c = 0; c < values.length; c += 1) {
+              var cell = document.createElement('td');
+              cell.textContent = values[c] === '' || values[c] == null ? '' : String(values[c]);
+              tr.appendChild(cell);
+            }
+            body.appendChild(tr);
+          }
+        },
+        draw: function () {
+          var open = moldOpenRatio(State.phase);
+          var closePx = (1 - open) * Layout.moldTravel;
+          el.upperMold.setAttribute('transform', 'translate(0,' + closePx.toFixed(2) + ')');
+          el.pressRod.setAttribute('height', String(Layout.rodOpen + closePx));
+          var injecting = State.status === 'running' && State.phase >= 0.3 && State.phase < 0.48;
+          el.injectGlow.setAttribute('opacity', injecting ? '0.95' : '0.08');
+          var color = tempColor(State.temp);
+          el.moldUpper.setAttribute('fill', color);
+          el.moldLower.setAttribute('fill', color);
+          var hot = State.temp > TEMP_LIMIT;
+          var pulse = hot ? (0.45 + 0.55 * Math.abs(Math.sin(State.clock * 6))) : 1;
+          el.tempLed.setAttribute('fill', color);
+          el.tempLed.setAttribute('opacity', pulse.toFixed(2));
+          el.tempReadout.textContent = State.temp + ' °C';
+          el.tempReadout.setAttribute('fill', hot ? '#fca5a5' : '#e2e8f0');
+          el.moldState.textContent = moldLabel(State.phase);
+
+          var span = Layout.beltRight - Layout.beltLeft;
+          var pitch = 28;
+          var shift = ((State.beltShift % span) + span) % span;
+          for (var s = 0; s < this.stripes.length; s += 1) {
+            var sx = Layout.beltLeft + ((s * pitch + shift) % span);
+            var sw = 8;
+            if (sx + sw > Layout.beltRight) sw = Math.max(0, Layout.beltRight - sx);
+            this.stripes[s].setAttribute('x', sx.toFixed(1));
+            this.stripes[s].setAttribute('width', sw.toFixed(1));
+          }
+          var angle = (State.beltShift * 2.4) % 360;
+          for (var r = 0; r < this.rollers.length; r += 1) {
+            var roller = this.rollers[r];
+            roller.g.setAttribute('transform', 'rotate(' + angle.toFixed(1) + ' ' + roller.x + ' 335)');
+          }
+
+          if (State.flash > 0) {
+            el.sensorLed.setAttribute('fill', State.flashColor);
+            el.sensorBeam.setAttribute('opacity', '0.7');
+            el.sensorResult.textContent = State.flashText;
+            el.sensorResult.setAttribute('fill', State.flashColor);
+          } else {
+            el.sensorLed.setAttribute('fill', '#166534');
+            el.sensorBeam.setAttribute('opacity', '0.12');
+            el.sensorResult.textContent = '';
+          }
+
+          var ext = Pusher.ext;
+          el.pusherRod.setAttribute('height', String(Layout.pusherRodOpen + ext * Layout.pusherStroke));
+          el.pusherPad.setAttribute('y', String(Layout.pusherPadOpen + ext * Layout.pusherStroke));
+
+          for (var i = 0; i < Parts.list.length; i += 1) {
+            var part = Parts.list[i];
+            var fill = '#e2e8f0';
+            if (part.status === 'Conforme') fill = '#4ade80';
+            else if (part.status === 'Non-Conforme') fill = '#fb7185';
+            part.body.setAttribute('fill', fill);
+            var rot = part.phase.indexOf('drop') === 0 ? part.fall * 28 : 0;
+            part.node.setAttribute('transform', 'translate(' + part.x.toFixed(1) + ',' + part.y.toFixed(1) + ') rotate(' + rot.toFixed(1) + ' 23 11)');
+          }
+        }
+      };
+
+      var Parts = {
+        list: [],
+        seq: 0,
+        spawn: function () {
+          this.seq += 1;
+          var year = new Date().getFullYear();
+          var id = 'PIECE-' + year + '-' + String(this.seq).padStart(4, '0');
+          var built = Renderer.createPart();
+          var part = {
+            id: id,
+            x: Layout.spawnX,
+            y: Layout.partY,
+            phase: 'belt',
+            inspected: false,
+            status: null,
+            motif: '',
+            timestamp: null,
+            temp: null,
+            fall: 0,
+            originX: Layout.spawnX,
+            originY: Layout.partY,
+            node: built.g,
+            body: built.body
+          };
+          this.list.push(part);
+          el.partsLayer.appendChild(built.g);
+          State.molded += 1;
+          State.hudDirty = true;
+          return part;
+        },
+        finish: function (part, dest) {
+          var idx = this.list.indexOf(part);
+          if (idx >= 0) this.list.splice(idx, 1);
+          if (part.node.parentNode) part.node.parentNode.removeChild(part.node);
+          if (dest === 'scrap') State.inScrap += 1;
+          else State.inOk += 1;
+          Renderer.pushMini(dest);
+          State.hudDirty = true;
+        },
+        clear: function () {
+          this.list = [];
+          this.seq = 0;
+          Renderer.clearParts();
+        }
+      };
+
+      var Quality = {
+        inspect: function (part) {
+          part.inspected = true;
+          part.timestamp = new Date().toISOString();
+          part.temp = State.temp;
+          var ko = Math.random() * 100 < State.defectRate;
+          if (ko) {
+            part.status = 'Non-Conforme';
+            part.motif = 'Défaut simulé';
+            State.consecutive += 1;
+            State.scrap += 1;
+            State.flashText = 'NON CONFORME';
+            State.flashColor = '#fb7185';
+          } else {
+            part.status = 'Conforme';
+            part.motif = '';
+            State.consecutive = 0;
+            State.conform += 1;
+            State.flashText = 'CONFORME';
+            State.flashColor = '#4ade80';
+          }
+          State.flash = 0.55;
+          History.add(part);
+          Bus.emit('moulage:piece', {
+            id: part.id,
+            timestamp: part.timestamp,
+            status: part.status,
+            temp: part.temp,
+            motif: part.motif
+          });
+          if (ko && State.consecutive >= DEFECT_LIMIT && State.status === 'running') {
+            setStatus('quality_stop', '3 défauts consécutifs');
+          }
+        }
+      };
+
+      var Pusher = {
+        ext: 0,
+        dir: 0,
+        hold: 0,
+        active: null,
+        queue: [],
+        request: function (part) {
+          if (this.active === part || this.queue.indexOf(part) !== -1) return;
+          if (!this.active && this.dir === 0 && this.ext <= 0.001) {
+            this.active = part;
+            this.dir = 1;
+            return;
+          }
+          this.queue.push(part);
+        },
+        tick: function (dt, enabled) {
+          if (!enabled) return;
+          var rate = 3.6;
+          if (this.dir === 1) {
+            this.ext = Math.min(1, this.ext + rate * dt);
+            if (this.ext >= 1) {
+              this.dir = 0;
+              this.hold = 0.1;
+              if (this.active && this.active.phase === 'wait-push') {
+                this.active.phase = 'drop-scrap';
+                this.active.fall = 0;
+                this.active.originX = this.active.x;
+                this.active.originY = this.active.y;
+              }
+            }
+          } else if (this.hold > 0) {
+            this.hold -= dt;
+            if (this.hold <= 0) this.dir = -1;
+          } else if (this.dir === -1) {
+            this.ext = Math.max(0, this.ext - rate * dt);
+            if (this.ext <= 0) {
+              this.ext = 0;
+              this.dir = 0;
+              this.active = null;
+              if (this.queue.length) {
+                this.active = this.queue.shift();
+                this.dir = 1;
+              }
+            }
+          }
+        },
+        reset: function () {
+          this.ext = 0;
+          this.dir = 0;
+          this.hold = 0;
+          this.active = null;
+          this.queue = [];
+        }
+      };
+
+      function dropPart(part, dest, dt) {
+        part.fall += dt / 0.7;
+        var t = Math.min(1, part.fall);
+        var drift = dest === 'scrap' ? t * 20 : t * 40;
+        part.x = part.originX + drift;
+        part.y = part.originY + t * t * 155;
+        if (t >= 1) Parts.finish(part, dest);
+      }
+
+      var Simulation = {
+        tick: function (dt) {
+          State.clock += dt;
+          if (State.flash > 0) State.flash = Math.max(0, State.flash - dt);
+
+          if (State.status === 'running' && State.temp > TEMP_LIMIT) {
+            setStatus('overheat', 'surchauffe');
+          }
+
+          if (State.status === 'running') {
+            State.cycleT += dt;
+            var len = cycleLength();
+            State.phase = State.cycleT / len;
+            if (!State.spawned && State.phase >= 0.78) {
+              Parts.spawn();
+              State.spawned = true;
+            }
+            if (State.cycleT >= len) {
+              State.cycleT = 0;
+              State.phase = 0;
+              State.spawned = false;
+            }
+            State.beltShift += beltSpeed() * dt;
+          } else {
+            var idleLen = cycleLength();
+            State.phase = idleLen === 0 ? 0 : State.cycleT / idleLen;
+          }
+
+          var velocity = beltSpeed();
+          for (var i = Parts.list.length - 1; i >= 0; i -= 1) {
+            var part = Parts.list[i];
+            if (part.phase === 'belt') {
+              var rejectCruise = part.status === 'Non-Conforme' && allowsReject();
+              if (State.status === 'running' || rejectCruise) part.x += velocity * dt;
+              if (!part.inspected && part.x >= Layout.sensorX) Quality.inspect(part);
+              if (part.phase === 'belt' && part.status === 'Non-Conforme' && part.x >= Layout.pusherX) {
+                part.x = Layout.pusherX;
+                part.phase = 'wait-push';
+                part.originX = part.x;
+                part.originY = part.y;
+                Pusher.request(part);
+              } else if (part.phase === 'belt' && part.status === 'Conforme' && part.x >= Layout.beltEnd) {
+                part.phase = 'drop-ok';
+                part.fall = 0;
+                part.originX = part.x;
+                part.originY = part.y;
+              }
+            } else if (part.phase === 'drop-ok' && State.status === 'running') {
+              dropPart(part, 'ok', dt);
+            } else if (part.phase === 'drop-scrap' && allowsReject()) {
+              dropPart(part, 'scrap', dt);
+            }
+          }
+          Pusher.tick(dt, allowsReject());
+        }
+      };
+
+      function csvEscape(value) {
+        var s = value == null ? '' : String(value);
+        if (/[;"\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+        return s;
+      }
+
+      function fileStamp() {
+        var d = new Date();
+        function p(n) { return String(n).padStart(2, '0'); }
+        return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+      }
+
+      var Exporter = {
+        timer: null,
+        remaining: 0,
+        minutes: function () {
+          var n = Number(el.exportMinutes.value);
+          if (!isFinite(n)) n = 5;
+          n = Math.min(120, Math.max(1, Math.round(n)));
+          el.exportMinutes.value = String(n);
+          return n;
+        },
+        setStatus: function (text) {
+          el.exportStatus.textContent = text;
+        },
+        exportNow: function (automatic) {
+          if (!History.rows.length) {
+            this.setStatus(automatic ? 'Export auto ignoré : historique vide.' : 'Historique vide.');
+            return false;
+          }
+          var lines = ['ID_Piece;Horodatage;Temp_Moule;Statut;Motif_Rebut'];
+          for (var i = 0; i < History.rows.length; i += 1) {
+            var row = History.rows[i];
+            lines.push([row.id, row.timestamp, row.temp, row.status, row.motif].map(csvEscape).join(';'));
+          }
+          var csv = '\uFEFF' + lines.join('\r\n');
+          var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+          var url = URL.createObjectURL(blob);
+          var link = document.createElement('a');
+          var name = 'historique_moulage_' + fileStamp() + '.csv';
+          link.href = url;
+          link.download = name;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+          this.setStatus((automatic ? 'Export automatique : ' : 'Export : ') + name);
+          return true;
+        },
+        paintCountdown: function () {
+          if (!el.exportAuto.checked) {
+            el.exportCountdown.textContent = 'Export automatique inactif';
+            return;
+          }
+          var total = Math.max(0, this.remaining);
+          var m = Math.floor(total / 60);
+          var s = total % 60;
+          el.exportCountdown.textContent = 'Prochain export dans ' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        },
+        configure: function () {
+          if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+          }
+          if (!el.exportAuto.checked) {
+            this.paintCountdown();
+            return;
+          }
+          var self = this;
+          this.remaining = this.minutes() * 60;
+          this.paintCountdown();
+          this.timer = setInterval(function () {
+            self.remaining -= 1;
+            if (self.remaining <= 0) {
+              self.exportNow(true);
+              self.remaining = self.minutes() * 60;
+            }
+            self.paintCountdown();
+          }, 1000);
+        }
+      };
+
+      function bootDom() {
+        el.badge = requireEl('badge-status');
+        el.chipRunning = requireEl('chip-running');
+        el.chipPaused = requireEl('chip-paused');
+        el.chipOverheat = requireEl('chip-overheat');
+        el.chipQuality = requireEl('chip-quality');
+        el.card = requireEl('synoptic-card');
+        el.message = requireEl('line-message');
+        el.btnStart = requireEl('btn-start');
+        el.btnPause = requireEl('btn-pause');
+        el.btnStop = requireEl('btn-stop');
+        el.btnReset = requireEl('btn-reset');
+        el.sliderSpeed = requireEl('slider-speed');
+        el.sliderDefect = requireEl('slider-defect');
+        el.sliderTemp = requireEl('slider-temp');
+        el.outSpeed = requireEl('out-speed');
+        el.outDefect = requireEl('out-defect');
+        el.outTemp = requireEl('out-temp');
+        el.tempHint = requireEl('temp-hint');
+        el.statMolded = requireEl('stat-molded');
+        el.statLine = requireEl('stat-line');
+        el.statOk = requireEl('stat-ok');
+        el.statKo = requireEl('stat-ko');
+        el.statConsecutive = requireEl('stat-consecutive');
+        el.historyBody = requireEl('history-body');
+        el.exportMinutes = requireEl('export-minutes');
+        el.exportAuto = requireEl('export-auto');
+        el.exportCountdown = requireEl('export-countdown');
+        el.exportStatus = requireEl('export-status');
+        el.wsUrl = requireEl('ws-url');
+        el.btnWs = requireEl('btn-ws');
+        el.wsDot = requireEl('ws-dot');
+        el.wsState = requireEl('ws-state');
+        el.upperMold = requireEl('upper-mold');
+        el.pressRod = requireEl('press-rod');
+        el.injectGlow = requireEl('inject-glow');
+        el.tempLed = requireEl('temp-led');
+        el.tempReadout = requireEl('temp-readout');
+        el.moldState = requireEl('mold-state');
+        el.moldUpper = requireEl('mold-upper-body');
+        el.moldLower = requireEl('mold-lower-body');
+        el.beltStripes = requireEl('belt-stripes');
+        el.rollers = requireEl('rollers');
+        el.sensorLed = requireEl('sensor-led');
+        el.sensorBeam = requireEl('sensor-beam');
+        el.sensorResult = requireEl('sensor-result');
+        el.pusherRod = requireEl('pusher-rod');
+        el.pusherPad = requireEl('pusher-pad');
+        el.partsLayer = requireEl('parts-layer');
+        el.scrapCount = requireEl('scrap-count');
+        el.okCount = requireEl('ok-count');
+        el.scrapMinis = requireEl('scrap-minis');
+        el.okMinis = requireEl('ok-minis');
+      }
+
+      window.startLine = function () {
+        if (State.status === 'running') return;
+        if (State.status === 'emergency') {
+          State.message = "Arrêt d'urgence verrouillé. Réinitialiser pour acquitter.";
+          State.hudDirty = true;
+          Renderer.syncHud();
+          return;
+        }
+        if (State.status === 'quality_stop') {
+          State.message = 'Arrêt sécurité qualité verrouillé. Réinitialiser pour relancer.';
+          State.hudDirty = true;
+          Renderer.syncHud();
+          return;
+        }
+        if (State.temp > TEMP_LIMIT) {
+          State.message = MESSAGES.surchauffe;
+          if (State.status !== 'overheat') setStatus('overheat', 'surchauffe');
+          else State.hudDirty = true;
+          Renderer.syncHud();
+          return;
+        }
+        setStatus('running', State.status === 'paused' ? 'reprise' : 'démarrage');
+        Renderer.syncHud();
+      };
+
+      window.pauseLine = function () {
+        if (State.status !== 'running') return;
+        setStatus('paused', 'pause');
+        Renderer.syncHud();
+      };
+
+      window.stopLine = function () {
+        if (State.status === 'emergency') return;
+        setStatus('emergency', 'arrêt urgence');
+        Renderer.syncHud();
+      };
+
+      window.resetLine = function () {
+        Parts.clear();
+        Pusher.reset();
+        History.clear();
+        Renderer.clearBins();
+        State.consecutive = 0;
+        State.molded = 0;
+        State.conform = 0;
+        State.scrap = 0;
+        State.inOk = 0;
+        State.inScrap = 0;
+        State.cycleT = 0;
+        State.phase = 0;
+        State.spawned = false;
+        State.beltShift = 0;
+        State.flash = 0;
+        State.flashText = '';
+        setStatus('ready', 'réinitialisation');
+        Renderer.syncHud();
+      };
+
+      window.setSpeed = function (val) {
+        var v = clamp(val, 1, 10);
+        if (v == null) return;
+        State.speed = Math.round(v);
+        State.hudDirty = true;
+        Renderer.syncHud();
+      };
+
+      window.setDefectRate = function (val) {
+        var v = clamp(val, 0, 100);
+        if (v == null) return;
+        State.defectRate = Math.round(v);
+        State.hudDirty = true;
+        Renderer.syncHud();
+      };
+
+      window.setTemperature = function (val) {
+        var v = clamp(val, 150, 250);
+        if (v == null) return;
+        State.temp = Math.round(v);
+        State.hudDirty = true;
+        if (State.status === 'running' && State.temp > TEMP_LIMIT) {
+          setStatus('overheat', 'surchauffe');
+        }
+        Renderer.syncHud();
+      };
+
+      window.getHistory = function () {
+        return History.rows.map(function (row) {
+          return {
+            id: row.id,
+            timestamp: row.timestamp,
+            temp: row.temp,
+            status: row.status,
+            motif: row.motif
+          };
+        });
+      };
+
+      window.getLineState = function () {
+        return {
+          status: STATUS_LABEL[State.status],
+          code: State.status,
+          temp: State.temp,
+          speed: State.speed,
+          defectRate: State.defectRate,
+          consecutive: State.consecutive,
+          molded: State.molded,
+          conform: State.conform,
+          scrap: State.scrap
+        };
+      };
+
+      window.exportHistory = function () {
+        return Exporter.exportNow(false);
+      };
+
+      window.connectWebSocket = function (url) {
+        if (!url || typeof url !== 'string') return;
+        window.disconnectWebSocket();
+        el.wsUrl.value = url;
+        var socket;
+        try {
+          socket = new WebSocket(url);
+        } catch (err) {
+          Renderer.setWs('error');
+          return;
+        }
+        var failed = false;
+        WsBridge.socket = socket;
+        Renderer.setWs('connecting');
+        socket.onopen = function () {
+          Renderer.setWs('open');
+          WsBridge.forward('moulage:status', {
+            status: STATUS_LABEL[State.status],
+            temp: State.temp,
+            speed: State.speed,
+            reason: 'connexion'
+          });
+        };
+        socket.onerror = function () {
+          failed = true;
+          Renderer.setWs('error');
+        };
+        socket.onclose = function () {
+          if (WsBridge.socket !== socket) return;
+          WsBridge.socket = null;
+          Renderer.setWs(failed ? 'error' : 'closed');
+        };
+        socket.onmessage = function (ev) {
+          WsBridge.handleIncoming(ev.data);
+        };
+      };
+
+      window.disconnectWebSocket = function () {
+        var socket = WsBridge.socket;
+        WsBridge.socket = null;
+        if (socket) {
+          socket.onopen = null;
+          socket.onerror = null;
+          socket.onclose = null;
+          socket.onmessage = null;
+          try { socket.close(); } catch (err) { /* déjà fermée */ }
+        }
+        Renderer.setWs('closed');
+      };
+
+      function boot() {
+        bootDom();
+        Renderer.init();
+        el.btnStart.addEventListener('click', function () { window.startLine(); });
+        el.btnPause.addEventListener('click', function () { window.pauseLine(); });
+        el.btnStop.addEventListener('click', function () { window.stopLine(); });
+        el.btnReset.addEventListener('click', function () { window.resetLine(); });
+        el.sliderSpeed.addEventListener('input', function () { window.setSpeed(el.sliderSpeed.value); });
+        el.sliderDefect.addEventListener('input', function () { window.setDefectRate(el.sliderDefect.value); });
+        el.sliderTemp.addEventListener('input', function () { window.setTemperature(el.sliderTemp.value); });
+        requireEl('btn-export').addEventListener('click', function () { window.exportHistory(); });
+        el.exportAuto.addEventListener('change', function () { Exporter.configure(); });
+        el.exportMinutes.addEventListener('change', function () { Exporter.configure(); });
+        el.btnWs.addEventListener('click', function () {
+          var open = WsBridge.socket && (WsBridge.socket.readyState === WebSocket.OPEN || WsBridge.socket.readyState === WebSocket.CONNECTING);
+          if (open) window.disconnectWebSocket();
+          else window.connectWebSocket(el.wsUrl.value.trim());
+        });
+        Renderer.syncHud();
+        Exporter.paintCountdown();
+
+        var last = performance.now();
+        var rafId = 0;
+        var timerId = 0;
+
+        function step(now) {
+          var acc = Math.min(1, (now - last) / 1000);
+          last = now;
+          while (acc > 0.0001) {
+            var dt = Math.min(0.05, acc);
+            Simulation.tick(dt);
+            acc -= dt;
+          }
+          Renderer.draw();
+          Renderer.syncHud();
+        }
+
+        function onFrame(now) {
+          step(now);
+          rafId = requestAnimationFrame(onFrame);
+        }
+
+        function engage() {
+          if (document.hidden) {
+            if (rafId) {
+              cancelAnimationFrame(rafId);
+              rafId = 0;
+            }
+            if (!timerId) timerId = setInterval(function () { step(performance.now()); }, 200);
+          } else {
+            if (timerId) {
+              clearInterval(timerId);
+              timerId = 0;
+            }
+            if (!rafId) rafId = requestAnimationFrame(onFrame);
+          }
+          last = performance.now();
+        }
+
+        document.addEventListener('visibilitychange', engage);
+        engage();
+      }
+
+      boot();
+    })();
+  </script>
+</body>
+</html>

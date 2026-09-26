@@ -1,0 +1,1797 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simulation Moulage Automobile V2</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0.35rem 0.9rem;
+      font-weight: 700;
+      background: #334155;
+      color: #f8fafc;
+    }
+    .badge[data-status="running"] { background: #059669; }
+    .badge[data-status="stopped"] { background: #475569; }
+    .badge[data-status="overheat"] { background: #dc2626; }
+    .badge[data-status="quality_stop"] { background: #ea580c; }
+    .badge[data-status="emergency"] { background: #991b1b; box-shadow: 0 0 0 2px #fecaca; }
+    .chip {
+      border-radius: 999px;
+      padding: 0.2rem 0.7rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+    }
+    .chip.is-on[data-kind="running"] { background: #059669; color: #fff; border-color: #059669; }
+    .chip.is-on[data-kind="stopped"] { background: #475569; color: #fff; border-color: #64748b; }
+    .chip.is-on[data-kind="overheat"] { background: #dc2626; color: #fff; border-color: #dc2626; }
+    .chip.is-on[data-kind="quality"] { background: #ea580c; color: #fff; border-color: #ea580c; }
+    .chip.is-on[data-kind="emergency"] { background: #991b1b; color: #fff; border-color: #fecaca; }
+    input[type="range"] { accent-color: #38bdf8; width: 100%; }
+    #history-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    #history-table th, #history-table td {
+      text-align: left;
+      padding: 0.45rem 0.65rem;
+      border-bottom: 1px solid #1e293b;
+      white-space: nowrap;
+    }
+    #history-table th {
+      position: sticky;
+      top: 0;
+      background: #0f172a;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+    #history-table td:first-child { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    #history-table tr.row-ok td:nth-child(4) { color: #6ee7b7; }
+    #history-table tr.row-ko td:nth-child(4) { color: #fda4af; }
+    #history-table tr.row-empty td { color: #64748b; }
+    .swatch {
+      display: inline-block;
+      width: 0.7rem;
+      height: 0.7rem;
+      border-radius: 2px;
+      margin-right: 0.35rem;
+      vertical-align: -1px;
+    }
+    .swatch-raw { background: #e2e8f0; }
+    .swatch-check { background: #fbbf24; }
+    .swatch-ko { background: #fb7185; }
+    .swatch-ok { background: #4ade80; }
+    #ws-dot {
+      width: 0.65rem;
+      height: 0.65rem;
+      border-radius: 999px;
+      background: #64748b;
+      display: inline-block;
+    }
+    #ws-dot[data-ws="open"] { background: #22c55e; }
+    #ws-dot[data-ws="connecting"] { background: #f59e0b; }
+    #ws-dot[data-ws="error"] { background: #ef4444; }
+    #ws-dot[data-ws="closed"] { background: #64748b; }
+    #temp-hint.is-hot-text { color: #f87171; font-weight: 600; }
+    #synoptic text { font-family: ui-sans-serif, system-ui, sans-serif; }
+    #challenge-time { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    @keyframes alarm-pulse {
+      0%, 100% { box-shadow: inset 0 0 0 0 rgba(239, 68, 68, 0); background-color: rgb(15 23 42); }
+      50% { box-shadow: inset 0 0 0 3px #ef4444; background-color: #450a0a; }
+    }
+    #dashboard.is-alarm {
+      animation: alarm-pulse 0.7s linear infinite;
+      border-color: #ef4444;
+    }
+    @keyframes pack-blink {
+      0%, 100% { fill: #334155; }
+      50% { fill: #f97316; }
+    }
+    #pack-station.is-bottleneck .pack-shell { animation: pack-blink 0.55s linear infinite; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <div class="mx-auto max-w-[90rem] space-y-4 p-4 md:p-6">
+    <header id="dashboard" class="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Simulation de moulage automobile V2</h1>
+        <p class="text-sm text-slate-400">Injection, contrôle optique, emballage et stock final. Commande locale ou WebSocket Node-RED.</p>
+        <p id="defect-alert" class="mt-2 hidden text-sm font-semibold text-red-300" aria-live="assertive">Alerte : taux de défaut supérieur à 30 %.</p>
+      </div>
+      <div id="badge-status" class="badge" data-status="ready" aria-live="polite">Prête</div>
+    </header>
+
+    <div class="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <section id="synoptic-card" class="rounded-xl border border-slate-800 bg-slate-900 p-3">
+        <svg id="synoptic" viewBox="0 0 1440 640" class="h-auto w-full" role="img" aria-label="Synoptique de la ligne de moulage et d'emballage">
+          <rect x="0" y="0" width="1440" height="640" fill="#020617" />
+          <rect x="0" y="588" width="1440" height="52" fill="#0f172a" />
+          <text x="520" y="32" text-anchor="middle" font-size="18" fill="#f8fafc">Ligne de moulage et de conditionnement</text>
+
+          <g id="challenge-hud">
+            <text x="1040" y="28" font-size="12" fill="#94a3b8">Mode Défi</text>
+            <text id="challenge-time" x="1384" y="30" text-anchor="end" font-size="22" fill="#64748b">00:00</text>
+            <rect x="1040" y="42" width="344" height="12" rx="6" fill="#1e293b" />
+            <rect id="challenge-bar" x="1040" y="42" width="0" height="12" rx="6" fill="#34d399" />
+            <text id="challenge-count" x="1040" y="72" font-size="12" fill="#64748b">0 / 100</text>
+          </g>
+
+          <g id="press">
+            <rect x="30" y="118" width="16" height="230" fill="#334155" />
+            <rect x="168" y="118" width="16" height="230" fill="#334155" />
+            <rect x="24" y="118" width="166" height="16" fill="#475569" />
+            <rect x="48" y="78" width="88" height="36" rx="4" fill="#64748b" />
+            <rect id="press-rod" x="86" y="112" width="12" height="28" fill="#e2e8f0" />
+            <g id="upper-mold">
+              <rect x="52" y="156" width="112" height="12" fill="#64748b" />
+              <rect x="64" y="168" width="88" height="36" rx="2" fill="#38bdf8" />
+              <path d="M76,186 H140 V204 H76 Z" fill="#082f49" />
+              <circle cx="74" cy="180" r="3" fill="#cbd5e1" />
+              <circle cx="142" cy="180" r="3" fill="#cbd5e1" />
+            </g>
+            <g id="lower-mold">
+              <rect x="64" y="262" width="88" height="36" rx="2" fill="#38bdf8" />
+              <path d="M76,262 H140 V280 H76 Z" fill="#082f49" />
+              <circle cx="74" cy="286" r="3" fill="#082f49" />
+              <circle cx="142" cy="286" r="3" fill="#082f49" />
+              <rect x="52" y="298" width="112" height="12" fill="#64748b" />
+            </g>
+            <rect id="mold-shot" x="80" y="214" width="56" height="14" rx="2" fill="#e2e8f0" opacity="0" />
+            <rect x="36" y="318" width="150" height="16" fill="#334155" />
+            <rect x="170" y="322" width="52" height="8" fill="#475569" />
+            <rect id="inject-glow" x="150" y="322" width="28" height="8" fill="#fbbf24" opacity="0.08" />
+            <circle id="temp-led" cx="44" cy="148" r="6" fill="#38bdf8" />
+            <text id="temp-readout" x="56" y="152" font-size="12" fill="#e2e8f0">185 °C</text>
+            <text id="mold-state" x="36" y="68" font-size="12" fill="#94a3b8">Moule ouvert</text>
+            <text x="36" y="108" font-size="12" fill="#cbd5e1">Presse d'injection</text>
+          </g>
+
+          <g id="conveyor">
+            <rect x="198" y="336" width="992" height="6" fill="#334155" />
+            <rect x="198" y="342" width="992" height="16" fill="#0b1220" />
+            <g id="belt-stripes"></g>
+            <rect x="198" y="358" width="992" height="6" fill="#475569" />
+            <g id="rollers"></g>
+            <text x="620" y="398" font-size="12" fill="#94a3b8">Sens du convoyeur →</text>
+          </g>
+
+          <g id="sensor-inspect">
+            <text id="sensor-result" x="330" y="132" font-size="13" fill="#4ade80"></text>
+            <text x="330" y="168" font-size="12" fill="#cbd5e1">Contrôle optique</text>
+            <rect x="400" y="180" width="48" height="18" rx="3" fill="#475569" />
+            <circle id="sensor-led" cx="424" cy="189" r="5" fill="#166534" />
+            <rect x="418" y="198" width="12" height="118" fill="#334155" />
+            <rect id="sensor-beam" x="421" y="206" width="6" height="110" fill="#4ade80" opacity="0.12" />
+          </g>
+
+          <g id="pusher">
+            <text x="500" y="168" font-size="12" fill="#cbd5e1">Vérin de rejet</text>
+            <rect x="524" y="228" width="54" height="24" rx="3" fill="#64748b" />
+            <rect id="pusher-rod" x="544" y="252" width="14" height="20" fill="#e2e8f0" />
+            <rect id="pusher-pad" x="528" y="272" width="46" height="8" rx="2" fill="#cbd5e1" />
+          </g>
+
+          <g id="bin-scrap">
+            <path d="M470,408 H670 L650,575 H490 Z" fill="#450a0a" stroke="#fb7185" stroke-width="2" />
+            <text x="570" y="432" text-anchor="middle" font-size="13" fill="#fecdd3">Bac Rebut</text>
+            <g id="scrap-minis"></g>
+            <text id="scrap-count" x="570" y="552" text-anchor="middle" font-size="20" fill="#fff1f2">0</text>
+          </g>
+
+          <g id="sensor-presence">
+            <text x="640" y="168" font-size="12" fill="#93c5fd">Présence</text>
+            <rect x="674" y="186" width="28" height="16" rx="3" fill="#1e3a8a" />
+            <circle id="presence-led" cx="688" cy="194" r="5" fill="#1e3a8a" />
+            <rect x="684" y="202" width="8" height="114" fill="#334155" />
+            <rect id="presence-beam" x="686" y="208" width="4" height="108" fill="#38bdf8" opacity="0.12" />
+          </g>
+
+          <g id="pack-station">
+            <rect class="pack-shell" x="788" y="176" width="18" height="172" rx="2" fill="#334155" />
+            <rect class="pack-shell" x="946" y="176" width="18" height="172" rx="2" fill="#334155" />
+            <rect class="pack-shell" x="788" y="176" width="176" height="26" rx="2" fill="#334155" />
+            <rect x="812" y="210" width="128" height="72" rx="4" fill="#0f172a" />
+            <text x="876" y="168" text-anchor="middle" font-size="12" fill="#cbd5e1">Emballage automobile</text>
+            <text id="pack-label" x="876" y="250" text-anchor="middle" font-size="13" fill="#fde68a" visibility="hidden">Emballage en cours</text>
+            <rect id="seal-bar" x="824" y="292" width="70" height="6" rx="1" fill="#94a3b8" />
+          </g>
+
+          <g id="sensor-count">
+            <text x="1004" y="168" font-size="12" fill="#86efac">Comptage</text>
+            <rect x="1038" y="186" width="28" height="16" rx="3" fill="#14532d" />
+            <circle id="count-led" cx="1052" cy="194" r="5" fill="#14532d" />
+            <rect x="1048" y="202" width="8" height="114" fill="#334155" />
+            <rect id="count-beam" x="1050" y="208" width="4" height="108" fill="#4ade80" opacity="0.12" />
+          </g>
+
+          <g id="bin-ok">
+            <path d="M1210,390 H1416 L1396,575 H1230 Z" fill="#022c22" stroke="#34d399" stroke-width="2" />
+            <text x="1313" y="418" text-anchor="middle" font-size="13" fill="#a7f3d0">Stock final</text>
+            <g id="ok-minis"></g>
+            <text id="ok-count" x="1313" y="552" text-anchor="middle" font-size="20" fill="#ecfdf5">0</text>
+          </g>
+
+          <g id="parts-layer"></g>
+
+          <g id="challenge-banner" visibility="hidden">
+            <rect id="challenge-banner-bg" x="280" y="200" width="880" height="210" rx="16" fill="#022c22" opacity="0.96" />
+            <text id="challenge-result" x="720" y="310" text-anchor="middle" font-size="72" font-weight="700" fill="#4ade80">Succès</text>
+            <text id="challenge-sub" x="720" y="362" text-anchor="middle" font-size="22" fill="#d1fae5">100 pièces conformes emballées</text>
+          </g>
+        </svg>
+        <div class="mt-2 flex flex-wrap gap-4 px-1 text-xs text-slate-400">
+          <span><i class="swatch swatch-raw"></i>En transfert</span>
+          <span><i class="swatch swatch-check"></i>Contrôle</span>
+          <span><i class="swatch swatch-ko"></i>Non conforme</span>
+          <span><i class="swatch swatch-ok"></i>Emballée</span>
+        </div>
+      </section>
+
+      <aside class="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4">
+        <div class="flex flex-wrap gap-2">
+          <div id="chip-running" class="chip" data-kind="running">En Marche</div>
+          <div id="chip-stopped" class="chip" data-kind="stopped">Arrêt</div>
+          <div id="chip-overheat" class="chip" data-kind="overheat">Surchauffe</div>
+          <div id="chip-quality" class="chip" data-kind="quality">Arrêt Sécurité</div>
+          <div id="chip-emergency" class="chip" data-kind="emergency">Arrêt d'urgence</div>
+        </div>
+        <p id="line-message" class="min-h-[2.5rem] text-sm text-slate-300" aria-live="polite">En attente de démarrage.</p>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btn-start" type="button" class="rounded-md bg-emerald-600 px-3 py-2 font-medium hover:bg-emerald-500 disabled:opacity-40">Démarrer</button>
+          <button id="btn-stop" type="button" class="rounded-md bg-slate-600 px-3 py-2 font-medium hover:bg-slate-500 disabled:opacity-40">Arrêter</button>
+          <button id="btn-emergency" type="button" class="col-span-2 rounded-md bg-red-700 px-3 py-2 font-semibold hover:bg-red-600 disabled:opacity-40">Arrêt d'urgence</button>
+          <button id="btn-reset" type="button" class="col-span-2 rounded-md bg-slate-700 px-3 py-2 font-medium hover:bg-slate-600">Réinitialiser</button>
+        </div>
+
+        <label class="block text-sm">
+          <span class="mb-1 flex justify-between text-slate-300"><span>Vitesse du convoyeur</span><span id="out-speed">50</span></span>
+          <input id="slider-speed" type="range" min="1" max="100" step="1" value="50" />
+        </label>
+        <label class="block text-sm">
+          <span class="mb-1 flex justify-between text-slate-300"><span>Cadence d'injection (s)</span><span id="out-cadence">4</span></span>
+          <input id="slider-cadence" type="range" min="1" max="15" step="1" value="4" />
+        </label>
+        <label class="block text-sm">
+          <span class="mb-1 flex justify-between text-slate-300"><span>Temps d'emballage (s)</span><span id="out-pack">3</span></span>
+          <input id="slider-pack" type="range" min="1" max="10" step="0.5" value="3" />
+        </label>
+        <label class="block text-sm">
+          <span class="mb-1 flex justify-between text-slate-300"><span>Temps de contrôle (s)</span><span id="out-control">2</span></span>
+          <input id="slider-control" type="range" min="0.5" max="8" step="0.5" value="2" />
+        </label>
+        <label class="block text-sm">
+          <span class="mb-1 flex justify-between text-slate-300"><span>Taux de défaut (%)</span><span id="out-defect">20</span></span>
+          <input id="slider-defect" type="range" min="0" max="100" step="1" value="20" />
+        </label>
+        <label class="block text-sm">
+          <span class="mb-1 flex justify-between text-slate-300"><span>Température de la presse (°C)</span><span id="out-temp">185</span></span>
+          <input id="slider-temp" type="range" min="150" max="250" step="1" value="185" />
+        </label>
+        <p id="temp-hint" class="text-xs text-slate-400">Arrêt automatique au-dessus de 220 °C. Une surchauffe aléatoire survient une fois par tranche de 10 minutes de marche. Arrêt qualité après 3 rebuts consécutifs.</p>
+
+        <dl class="grid grid-cols-2 gap-2 text-sm">
+          <div class="rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">Total injecté</dt><dd id="stat-molded" class="text-lg font-semibold">0</dd></div>
+          <div class="rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">En attente emballage</dt><dd id="stat-wait" class="text-lg font-semibold">0</dd></div>
+          <div class="rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">Conformes emballés</dt><dd id="stat-packed" class="text-lg font-semibold text-emerald-300">0</dd></div>
+          <div class="rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">Rebuts</dt><dd id="stat-scrap" class="text-lg font-semibold text-rose-300">0</dd></div>
+          <div class="rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">Taux de défaut</dt><dd id="stat-defect" class="text-lg font-semibold">0 %</dd></div>
+          <div class="rounded-md bg-slate-950 px-3 py-2" title="Disponibilité × Performance × Qualité"><dt class="text-slate-400">TRS / OEE</dt><dd id="stat-oee" class="text-lg font-semibold">0 %</dd></div>
+          <div class="col-span-2 rounded-md bg-slate-950 px-3 py-2"><dt class="text-slate-400">Défauts consécutifs</dt><dd id="stat-streak" class="text-lg font-semibold">0 / 3</dd></div>
+        </dl>
+
+        <div class="rounded-md border border-slate-800 bg-slate-950 p-3">
+          <p class="text-sm font-medium text-slate-200">Mode Défi</p>
+          <p class="mt-1 text-xs text-slate-400">Produire 100 pièces conformes et emballées en moins de 10 minutes.</p>
+          <button id="btn-challenge" type="button" class="mt-3 w-full rounded-md bg-sky-600 px-3 py-2 text-sm font-medium hover:bg-sky-500 disabled:opacity-40">Activer le mode Défi</button>
+        </div>
+      </aside>
+    </div>
+
+    <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">Traçabilité</h2>
+          <p class="text-sm text-slate-400">Horodatage enregistré au contrôle optique. La colonne Emballe passe à Oui en fin de conditionnement.</p>
+        </div>
+        <button id="btn-export" type="button" class="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium hover:bg-sky-500">Exporter l'historique en CSV</button>
+      </div>
+      <div class="mb-3 flex flex-wrap items-center gap-4 text-sm">
+        <label class="flex items-center gap-2">
+          <input id="export-auto" type="checkbox" class="h-4 w-4 accent-sky-500" />
+          Export automatique
+        </label>
+        <label class="flex items-center gap-2">
+          Toutes les
+          <input id="export-minutes" type="number" min="1" max="120" step="1" value="5" class="w-16 rounded-md border border-slate-700 bg-slate-950 px-2 py-1" />
+          minutes
+        </label>
+        <span id="export-countdown" class="text-slate-400">Export automatique inactif</span>
+      </div>
+      <p id="export-status" class="mb-3 min-h-[1.25rem] text-sm text-slate-400"></p>
+      <div class="max-h-80 overflow-auto rounded-md border border-slate-800">
+        <table id="history-table">
+          <thead>
+            <tr>
+              <th>ID_Piece</th>
+              <th>Horodatage</th>
+              <th>Temp_Moule</th>
+              <th>Statut</th>
+              <th>Motif_Rebut</th>
+              <th>Emballe</th>
+            </tr>
+          </thead>
+          <tbody id="history-body">
+            <tr class="row-empty"><td colspan="6">Aucune pièce inspectée.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <h2 class="text-lg font-semibold">WebSocket Node-RED</h2>
+      <p class="mb-3 text-sm text-slate-400">La ligne émet <span class="font-mono text-slate-300">moulage:piece</span> et <span class="font-mono text-slate-300">moulage:status</span>.</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <span id="ws-dot" data-ws="closed" aria-hidden="true"></span>
+        <input id="ws-url" type="text" spellcheck="false" value="ws://127.0.0.1:1880/ws/moulage" class="min-w-[16rem] flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm" />
+        <button id="btn-ws" type="button" class="rounded-md bg-slate-700 px-3 py-2 text-sm font-medium hover:bg-slate-600">Connecter</button>
+      </div>
+      <p id="ws-state" class="mt-2 text-sm text-slate-400">Déconnecté</p>
+      <details class="mt-3 text-sm text-slate-400">
+        <summary class="cursor-pointer text-slate-300">API console et commandes entrantes</summary>
+        <pre class="mt-2 overflow-auto rounded-md bg-slate-950 p-3 text-xs leading-relaxed text-slate-300">window.startLine()
+window.stopLine()
+window.setSpeed(val)       // 1 à 100
+window.resetSecurity()     // acquitte urgence / qualité, conserve l'historique
+window.setTemp(val)        // 150 à 250
+window.connectWebSocket(url)  // défaut ws://127.0.0.1:1880/ws/moulage
+
+Événement pièce :
+{ "type": "moulage:piece", "payload": { "id", "timestamp", "status", "temp", "packed", "totalCount", "conformeCount", "defectTotal", "defectRate" } }
+
+Événement statut :
+{ "type": "moulage:status", "payload": { "status": "En Marche|Surchauffe|Arrêt Sécurité", "temp", "speed", "defectStreak", "bottleneck", "challengeActive" } }
+
+Commande entrante :
+{ "action": "START" }
+{ "action": "STOP" }
+{ "action": "RESET" }
+{ "action": "SET_SPEED", "value": 60 }</pre>
+      </details>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var SVG_NS = 'http://www.w3.org/2000/svg';
+      var TEMP_LIMIT = 220;
+      var DEFECT_LIMIT = 3;
+      var MOLD_TIME = 0.9;
+      var CHALLENGE_SECONDS = 600;
+      var CHALLENGE_TARGET = 100;
+      var DEFAULT_WS = 'ws://127.0.0.1:1880/ws/moulage';
+      var PART_D = 'M1,7 H14 L18,3 H31 L36,7 H45 V15 H36 L31,19 H18 L14,15 H1 Z';
+
+      var Layout = {
+        spawnX: 218,
+        partW: 46,
+        partH: 19,
+        partY: 317,
+        inspectX: 400,
+        pusherX: 528,
+        presenceX: 688,
+        packX: 824,
+        countX: 1052,
+        exitX: 1156,
+        gap: 12,
+        beltLeft: 198,
+        beltRight: 1190,
+        scrapLandX: 548,
+        scrapLandY: 500,
+        okLandX: 1290,
+        okLandY: 490,
+        pusherRodY: 252,
+        pusherRodH: 20,
+        pusherPadY: 272,
+        pusherStroke: 46
+      };
+
+      var BADGE = {
+        ready: 'Prête',
+        running: 'En Marche',
+        stopped: 'Arrêt',
+        overheat: 'Surchauffe',
+        quality_stop: 'Arrêt Sécurité',
+        emergency: "Arrêt d'urgence"
+      };
+
+      var MESSAGES = {
+        'démarrage': 'Ligne en marche.',
+        'reprise': 'Ligne reprise.',
+        'arrêt': 'Ligne arrêtée.',
+        'urgence': "Arrêt d'urgence. Acquitter pour redémarrer.",
+        'réinitialisation': 'Ligne réinitialisée. Historique effacé.',
+        'surchauffe': 'Arrêt automatique : température supérieure à 220 °C.',
+        'surchauffe-alea': 'Arrêt automatique : surchauffe aléatoire, température supérieure à 220 °C.',
+        '3 défauts': 'Arrêt sécurité qualité : 3 non-conformes consécutives.',
+        'acquittement': 'Sécurité acquittée. La ligne peut redémarrer.',
+        'temp-ok': 'Température revenue sous le seuil de 220 °C.',
+        'verrou': "Acquitter l'arrêt de sécurité avant de redémarrer."
+      };
+
+      var State = {
+        status: 'ready',
+        speed: 50,
+        cadence: 4,
+        packTime: 3,
+        controlTime: 2,
+        defectRate: 20,
+        temp: 185,
+        consecutive: 0,
+        latch: false,
+        session: false,
+        molded: 0,
+        conform: 0,
+        scrap: 0,
+        packed: 0,
+        inspected: 0,
+        inOk: 0,
+        inScrap: 0,
+        waiting: 0,
+        bottleneck: false,
+        openTime: 0,
+        runTime: 0,
+        beltShift: 0,
+        flash: 0,
+        flashKind: '',
+        presenceHold: 0,
+        countHold: 0,
+        message: 'En attente de démarrage.',
+        historyDirty: true,
+        shownScrap: -1,
+        shownOk: -1
+      };
+
+      var el = {};
+      var stripes = [];
+      var rollers = [];
+
+      function requireEl(id) {
+        var node = document.getElementById(id);
+        if (!node) throw new Error('Élément manquant : #' + id);
+        return node;
+      }
+
+      function svgEl(name) {
+        return document.createElementNS(SVG_NS, name);
+      }
+
+      function clamp(value, min, max) {
+        var n = Number(value);
+        if (!isFinite(n)) return null;
+        return Math.min(max, Math.max(min, n));
+      }
+
+      function beltSpeed() {
+        return 24 + State.speed * 1.4;
+      }
+
+      function fmtNum(n) {
+        var r = Math.round(n * 10) / 10;
+        if (Math.abs(r - Math.round(r)) < 0.001) return String(Math.round(r));
+        return r.toFixed(1).replace('.', ',');
+      }
+
+      function fmtPct(n) {
+        return (Math.round(n * 10) / 10).toFixed(1).replace('.', ',') + ' %';
+      }
+
+      function mixHex(a, b, t) {
+        function ch(h, i) { return parseInt(h.substr(i, 2), 16); }
+        function hx(n) {
+          var s = Math.max(0, Math.min(255, Math.round(n))).toString(16);
+          return s.length < 2 ? '0' + s : s;
+        }
+        t = Math.min(1, Math.max(0, t));
+        return '#' + hx(ch(a, 1) + (ch(b, 1) - ch(a, 1)) * t) +
+          hx(ch(a, 3) + (ch(b, 3) - ch(a, 3)) * t) +
+          hx(ch(a, 5) + (ch(b, 5) - ch(a, 5)) * t);
+      }
+
+      function measuredDefect() {
+        if (!State.inspected) return 0;
+        return (State.scrap / State.inspected) * 100;
+      }
+
+      function kpis() {
+        var availability = State.openTime > 0 ? State.runTime / State.openTime : 0;
+        var theoretical = State.cadence > 0 ? State.runTime / State.cadence : 0;
+        var performance = theoretical > 0 ? Math.min(1, State.molded / theoretical) : 0;
+        var quality = State.inspected > 0 ? State.conform / State.inspected : 0;
+        return {
+          oee: availability * performance * quality * 100,
+          defect: measuredDefect()
+        };
+      }
+
+      function wsStatus() {
+        if (State.status === 'running') return 'En Marche';
+        if (State.status === 'overheat') return 'Surchauffe';
+        return 'Arrêt Sécurité';
+      }
+
+      function statusPayload() {
+        return {
+          status: wsStatus(),
+          temp: State.temp,
+          speed: State.speed,
+          defectStreak: State.consecutive,
+          bottleneck: !!State.bottleneck,
+          challengeActive: !!Challenge.active
+        };
+      }
+
+      var statusKey = '';
+      var statusArmed = false;
+
+      var Bus = {
+        emit: function (type, payload) {
+          var detail = JSON.parse(JSON.stringify(payload));
+          window.dispatchEvent(new CustomEvent(type, { detail: detail }));
+          Ws.forward(type, detail);
+        }
+      };
+
+      function publishStatus(force) {
+        var payload = statusPayload();
+        var key = JSON.stringify(payload);
+        if (!force && key === statusKey) return;
+        if (!force && !statusArmed) {
+          statusKey = key;
+          return;
+        }
+        statusKey = key;
+        statusArmed = true;
+        Bus.emit('moulage:status', payload);
+      }
+
+      function setStatus(next, reason) {
+        State.status = next;
+        if (reason && MESSAGES[reason]) State.message = MESSAGES[reason];
+        publishStatus(true);
+      }
+
+      function piecePayload(part) {
+        return {
+          id: part.id,
+          timestamp: part.timestamp,
+          status: part.status,
+          temp: part.temp,
+          packed: !!part.packed,
+          totalCount: State.molded,
+          conformeCount: State.conform,
+          defectTotal: State.scrap,
+          defectRate: Math.round(measuredDefect())
+        };
+      }
+
+      var History = {
+        rows: [],
+        add: function (part) {
+          this.rows.push({
+            id: part.id,
+            timestamp: part.timestamp,
+            temp: part.temp,
+            status: part.status,
+            motif: part.motif || '',
+            emballe: 'Non'
+          });
+          State.historyDirty = true;
+        },
+        markPacked: function (id) {
+          for (var i = this.rows.length - 1; i >= 0; i -= 1) {
+            if (this.rows[i].id === id) {
+              this.rows[i].emballe = 'Oui';
+              break;
+            }
+          }
+          State.historyDirty = true;
+        },
+        clear: function () {
+          this.rows = [];
+          State.historyDirty = true;
+        }
+      };
+
+      var Ws = {
+        socket: null,
+        forward: function (type, payload) {
+          if (!this.socket || this.socket.readyState !== 1) return;
+          try {
+            this.socket.send(JSON.stringify({ type: type, payload: payload }));
+          } catch (err) { /* socket en cours de fermeture */ }
+        },
+        handle: function (raw) {
+          var data = raw;
+          if (typeof raw === 'string') {
+            try { data = JSON.parse(raw); } catch (err) { return; }
+          }
+          if (!data || typeof data !== 'object') return;
+          var action = String(data.action || '').toUpperCase();
+          if (action === 'START') window.startLine();
+          else if (action === 'STOP') window.stopLine();
+          else if (action === 'RESET') window.resetSecurity();
+          else if (action === 'SET_SPEED') window.setSpeed(data.value);
+        }
+      };
+
+      function setWsMode(mode) {
+        var labels = {
+          open: 'Connecté',
+          connecting: 'Connexion…',
+          error: 'Erreur de connexion',
+          closed: 'Déconnecté'
+        };
+        el.wsDot.setAttribute('data-ws', mode);
+        el.wsState.textContent = labels[mode] || labels.closed;
+        el.btnWs.textContent = (mode === 'open' || mode === 'connecting') ? 'Déconnecter' : 'Connecter';
+      }
+
+      var Injector = {
+        active: false,
+        t: 0,
+        spawned: false,
+        cooldown: 0,
+        exitClear: function () {
+          var limit = Layout.spawnX + Layout.partW + Layout.gap;
+          for (var i = 0; i < Parts.list.length; i += 1) {
+            var part = Parts.list[i];
+            if (part.phase === 'drop-scrap' || part.phase === 'drop-ok') continue;
+            if (part.x < limit) return false;
+          }
+          return true;
+        },
+        tick: function (dt) {
+          if (State.status !== 'running') return;
+          this.cooldown += dt;
+          if (this.active) {
+            var spawnAt = MOLD_TIME * 0.78;
+            if (!this.spawned && this.t >= spawnAt) {
+              if (this.exitClear()) {
+                Parts.spawn();
+                this.spawned = true;
+              } else {
+                this.t = spawnAt;
+              }
+            }
+            this.t += dt;
+            if (this.spawned && this.t >= MOLD_TIME) {
+              this.active = false;
+              this.t = 0;
+            }
+          }
+          if (!this.active && this.cooldown >= State.cadence && this.exitClear()) {
+            this.cooldown = 0;
+            this.active = true;
+            this.t = 0;
+            this.spawned = false;
+          }
+        },
+        ratio: function () {
+          if (!this.active) return 0;
+          var t = this.t / MOLD_TIME;
+          if (t < 0.28) return t / 0.28;
+          if (t < 0.62) return 1;
+          if (t < 0.82) return 1 - (t - 0.62) / 0.2;
+          return 0;
+        },
+        label: function () {
+          if (!this.active) return 'Moule ouvert';
+          var t = this.t / MOLD_TIME;
+          if (t < 0.28) return 'Fermeture';
+          if (t < 0.62) return 'Injection';
+          if (t < 0.82) return 'Ouverture';
+          return 'Éjection';
+        },
+        reset: function () {
+          this.active = false;
+          this.t = 0;
+          this.spawned = false;
+          this.cooldown = 0;
+        }
+      };
+
+      var Parts = {
+        list: [],
+        seq: 0,
+        spawn: function () {
+          this.seq += 1;
+          var year = new Date().getFullYear();
+          var id = 'PIECE-' + year + '-' + String(this.seq).padStart(4, '0');
+          var g = svgEl('g');
+          var box = svgEl('rect');
+          box.setAttribute('x', -4);
+          box.setAttribute('y', -5);
+          box.setAttribute('width', String(Layout.partW + 8));
+          box.setAttribute('height', String(Layout.partH + 8));
+          box.setAttribute('rx', '2');
+          box.setAttribute('fill', '#166534');
+          box.setAttribute('stroke', '#4ade80');
+          box.setAttribute('opacity', '0');
+          var tape = svgEl('rect');
+          tape.setAttribute('x', '16');
+          tape.setAttribute('y', '-5');
+          tape.setAttribute('width', '8');
+          tape.setAttribute('height', String(Layout.partH + 8));
+          tape.setAttribute('fill', '#86efac');
+          tape.setAttribute('opacity', '0');
+          var body = svgEl('path');
+          body.setAttribute('d', PART_D);
+          body.setAttribute('fill', '#e2e8f0');
+          g.appendChild(box);
+          g.appendChild(tape);
+          g.appendChild(body);
+          g.setAttribute('data-id', id);
+          var part = {
+            id: id,
+            x: Layout.spawnX,
+            y: Layout.partY,
+            phase: 'belt',
+            status: '',
+            motif: '',
+            timestamp: '',
+            temp: State.temp,
+            packed: false,
+            inspected: false,
+            hold: 0,
+            fall: 0,
+            originX: Layout.spawnX,
+            originY: Layout.partY,
+            node: g,
+            body: body,
+            box: box,
+            tape: tape
+          };
+          this.list.push(part);
+          el.partsLayer.appendChild(g);
+          State.molded += 1;
+          return part;
+        },
+        finish: function (part, dest) {
+          var idx = this.list.indexOf(part);
+          if (idx >= 0) this.list.splice(idx, 1);
+          if (part.node.parentNode) part.node.parentNode.removeChild(part.node);
+          if (dest === 'scrap') State.inScrap += 1;
+          else State.inOk += 1;
+        },
+        clear: function () {
+          this.list = [];
+          this.seq = 0;
+          while (el.partsLayer.firstChild) el.partsLayer.removeChild(el.partsLayer.firstChild);
+        }
+      };
+
+      function packOccupied(except) {
+        for (var i = 0; i < Parts.list.length; i += 1) {
+          var part = Parts.list[i];
+          if (part !== except && part.phase === 'pack') return true;
+        }
+        return false;
+      }
+
+      function finishInspect(part) {
+        part.inspected = true;
+        part.timestamp = new Date().toISOString();
+        part.temp = State.temp;
+        part.packed = false;
+        var ko = Math.random() * 100 < State.defectRate;
+        if (ko) {
+          part.status = 'Non-Conforme';
+          part.motif = 'Défaut simulé';
+          State.consecutive += 1;
+          State.scrap += 1;
+          State.flashKind = 'ko';
+        } else {
+          part.status = 'Conforme';
+          part.motif = '';
+          State.consecutive = 0;
+          State.conform += 1;
+          State.flashKind = 'ok';
+        }
+        State.flash = 0.7;
+        State.inspected += 1;
+        part.phase = 'belt';
+        part.hold = 0;
+        History.add(part);
+        Bus.emit('moulage:piece', piecePayload(part));
+        if (ko && State.consecutive >= DEFECT_LIMIT && State.status === 'running') {
+          State.latch = true;
+          setStatus('quality_stop', '3 défauts');
+        }
+      }
+
+      function finishPack(part) {
+        part.packed = true;
+        part.phase = 'belt';
+        part.hold = State.packTime;
+        State.packed += 1;
+        History.markPacked(part.id);
+        Bus.emit('moulage:piece', piecePayload(part));
+        Challenge.onPacked();
+      }
+
+      function arrive(part) {
+        if (!part.inspected && part.x >= Layout.inspectX - 0.6) {
+          part.x = Layout.inspectX;
+          part.phase = 'inspect';
+          part.hold = 0;
+          return;
+        }
+        if (part.inspected && part.status === 'Non-Conforme' && part.x >= Layout.pusherX - 0.6) {
+          part.x = Layout.pusherX;
+          part.phase = 'wait-push';
+          part.originX = part.x;
+          part.originY = part.y;
+          Pusher.request(part);
+          return;
+        }
+        if (part.inspected && part.status === 'Conforme' && !part.packed && part.x >= Layout.packX - 0.6 && !packOccupied(part)) {
+          part.x = Layout.packX;
+          part.phase = 'pack';
+          part.hold = 0;
+          return;
+        }
+        if (part.packed && part.x >= Layout.exitX - 0.6) {
+          part.x = Layout.exitX;
+          part.phase = 'drop-ok';
+          part.fall = 0;
+          part.originX = part.x;
+          part.originY = part.y;
+        }
+      }
+
+      function movePart(part, dt, velocity, downstreamLimit) {
+        if (part.phase === 'inspect') {
+          if (State.status === 'running') {
+            part.hold += dt;
+            if (part.hold >= State.controlTime) finishInspect(part);
+          }
+          return;
+        }
+        if (part.phase === 'pack') {
+          if (State.status === 'running') {
+            part.hold += dt;
+            if (part.hold >= State.packTime) finishPack(part);
+          }
+          return;
+        }
+        if (part.phase === 'wait-push') return;
+
+        var rejectCruise = part.inspected && part.status === 'Non-Conforme';
+        if (State.status !== 'running' && !rejectCruise) return;
+
+        var maxX = downstreamLimit;
+        if (!part.inspected) maxX = Math.min(maxX, Layout.inspectX);
+        else if (part.status === 'Non-Conforme') maxX = Math.min(maxX, Layout.pusherX);
+        else if (!part.packed) maxX = Math.min(maxX, Layout.packX);
+        else maxX = Math.min(maxX, Layout.exitX);
+
+        var next = part.x + velocity * dt;
+        if (next >= maxX - 0.25) {
+          part.x = maxX;
+          arrive(part);
+        } else {
+          part.x = next;
+          if (part.phase === 'pack-wait') part.phase = 'belt';
+        }
+      }
+
+      function dropPart(part, dest, dt) {
+        part.fall += dt / 0.65;
+        var t = Math.min(1, part.fall);
+        var endX = dest === 'scrap' ? Layout.scrapLandX : Layout.okLandX;
+        var endY = dest === 'scrap' ? Layout.scrapLandY : Layout.okLandY;
+        part.x = part.originX + (endX - part.originX) * t;
+        part.y = part.originY + (endY - part.originY) * (t * t);
+        if (t >= 1) Parts.finish(part, dest);
+      }
+
+      function refreshQueue() {
+        var list = [];
+        for (var i = 0; i < Parts.list.length; i += 1) {
+          var part = Parts.list[i];
+          if (part.phase === 'drop-scrap' || part.phase === 'drop-ok' || part.phase === 'wait-push') continue;
+          list.push(part);
+        }
+        list.sort(function (a, b) { return a.x - b.x; });
+        var blocked = false;
+        for (var j = list.length - 1; j >= 0; j -= 1) {
+          var item = list[j];
+          if (item.packed) continue;
+          if (item.phase === 'pack') {
+            blocked = true;
+            continue;
+          }
+          if (!item.inspected || item.phase === 'inspect' || item.status !== 'Conforme') {
+            blocked = false;
+            continue;
+          }
+          var aheadX = (j + 1 < list.length) ? list[j + 1].x : Layout.packX;
+          var gap = aheadX - (item.x + Layout.partW);
+          var close = gap <= Layout.gap + 4;
+          if (blocked && close) item.phase = 'pack-wait';
+          else if (item.phase === 'pack-wait') item.phase = 'belt';
+          blocked = item.phase === 'pack-wait';
+        }
+        var wait = 0;
+        for (var k = 0; k < Parts.list.length; k += 1) {
+          if (Parts.list[k].phase === 'pack-wait') wait += 1;
+        }
+        State.waiting = wait;
+        State.bottleneck = wait > 0;
+      }
+
+      var Pusher = {
+        ext: 0,
+        dir: 0,
+        hold: 0,
+        active: null,
+        queue: [],
+        request: function (part) {
+          if (this.active === part || this.queue.indexOf(part) !== -1) return;
+          if (!this.active && this.dir === 0 && this.ext <= 0.001) {
+            this.active = part;
+            this.dir = 1;
+            return;
+          }
+          this.queue.push(part);
+        },
+        tick: function (dt) {
+          var rate = 2.8;
+          if (this.dir === 1) {
+            this.ext = Math.min(1, this.ext + rate * dt);
+            if (this.ext >= 1) {
+              this.dir = 0;
+              this.hold = 0.12;
+              if (this.active && this.active.phase === 'wait-push') {
+                this.active.phase = 'drop-scrap';
+                this.active.fall = 0;
+                this.active.originX = this.active.x;
+                this.active.originY = this.active.y;
+              }
+            }
+          } else if (this.hold > 0) {
+            this.hold -= dt;
+            if (this.hold <= 0) this.dir = -1;
+          } else if (this.dir === -1) {
+            this.ext = Math.max(0, this.ext - rate * dt);
+            if (this.ext <= 0) {
+              this.ext = 0;
+              this.dir = 0;
+              this.active = null;
+              if (this.queue.length) {
+                this.active = this.queue.shift();
+                this.dir = 1;
+              }
+            }
+          }
+        },
+        reset: function () {
+          this.ext = 0;
+          this.dir = 0;
+          this.hold = 0;
+          this.active = null;
+          this.queue = [];
+        }
+      };
+
+      function overlaps(part, x) {
+        return part.x <= x && part.x + Layout.partW >= x;
+      }
+
+      function onLine(part) {
+        return part.phase !== 'drop-scrap' && part.phase !== 'drop-ok';
+      }
+
+      var Challenge = {
+        active: false,
+        remaining: CHALLENGE_SECONDS,
+        packed: 0,
+        result: '',
+        start: function () {
+          this.active = true;
+          this.remaining = CHALLENGE_SECONDS;
+          this.packed = 0;
+          this.result = '';
+          publishStatus(true);
+        },
+        onPacked: function () {
+          if (!this.active) return;
+          this.packed += 1;
+          if (this.packed >= CHALLENGE_TARGET) {
+            this.active = false;
+            this.result = 'success';
+            publishStatus(true);
+          }
+        },
+        tick: function (dt) {
+          if (!this.active) return;
+          this.remaining -= dt;
+          if (this.remaining <= 0) {
+            this.remaining = 0;
+            this.active = false;
+            this.result = this.packed >= CHALLENGE_TARGET ? 'success' : 'fail';
+            publishStatus(true);
+          }
+        },
+        reset: function () {
+          this.active = false;
+          this.remaining = CHALLENGE_SECONDS;
+          this.packed = 0;
+          this.result = '';
+        }
+      };
+
+      function clockText(sec, countUp) {
+        var s = Math.max(0, countUp ? Math.floor(sec + 1e-9) : Math.ceil(sec - 1e-9));
+        var m = Math.floor(s / 60);
+        var r = s % 60;
+        return String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0');
+      }
+
+      var OVERHEAT_WINDOW = 600;
+
+      var Overheat = {
+        armed: false,
+        due: 0,
+        arm: function () {
+          this.armed = true;
+          this.due = State.runTime + Math.random() * OVERHEAT_WINDOW;
+        },
+        clear: function () {
+          this.armed = false;
+          this.due = 0;
+        },
+        tick: function () {
+          if (!this.armed || State.status !== 'running' || State.runTime < this.due) return;
+          this.armed = false;
+          var spike = 225 + Math.floor(Math.random() * 21);
+          window.setTemp(spike);
+          if (State.status === 'overheat') State.message = MESSAGES['surchauffe-alea'];
+        }
+      };
+
+      var Simulation = {
+        tick: function (dt) {
+          if (State.flash > 0) State.flash = Math.max(0, State.flash - dt);
+          if (State.session) {
+            State.openTime += dt;
+            if (State.status === 'running') State.runTime += dt;
+          }
+          Overheat.tick();
+          if (State.status === 'running' && State.temp > TEMP_LIMIT) {
+            setStatus('overheat', 'surchauffe');
+          }
+
+          Injector.tick(dt);
+
+          var velocity = beltSpeed();
+          var active = [];
+          for (var i = 0; i < Parts.list.length; i += 1) {
+            var part = Parts.list[i];
+            if (part.phase === 'drop-scrap' || part.phase === 'drop-ok') continue;
+            active.push(part);
+          }
+          active.sort(function (a, b) { return b.x - a.x; });
+          var limit = 4000;
+          for (var j = 0; j < active.length; j += 1) {
+            var current = active[j];
+            movePart(current, dt, velocity, limit);
+            if (current.phase !== 'drop-scrap' && current.phase !== 'drop-ok') {
+              limit = current.x - Layout.partW - Layout.gap;
+            }
+          }
+          for (var k = Parts.list.length - 1; k >= 0; k -= 1) {
+            var falling = Parts.list[k];
+            if (falling.phase === 'drop-scrap') dropPart(falling, 'scrap', dt);
+            else if (falling.phase === 'drop-ok') dropPart(falling, 'ok', dt);
+          }
+          Pusher.tick(dt);
+          refreshQueue();
+
+          var seenPresence = false;
+          var seenCount = false;
+          var animateBelt = State.status === 'running';
+          for (var n = 0; n < Parts.list.length; n += 1) {
+            var sensed = Parts.list[n];
+            if (!onLine(sensed)) continue;
+            if (overlaps(sensed, Layout.presenceX)) seenPresence = true;
+            if (sensed.packed && overlaps(sensed, Layout.countX)) seenCount = true;
+            if (sensed.status === 'Non-Conforme' && (sensed.phase === 'belt' || sensed.phase === 'wait-push')) animateBelt = true;
+          }
+          State.presenceHold = seenPresence ? 0.22 : Math.max(0, State.presenceHold - dt);
+          State.countHold = seenCount ? 0.22 : Math.max(0, State.countHold - dt);
+          if (animateBelt) State.beltShift += velocity * dt;
+
+          Challenge.tick(dt);
+          publishStatus(false);
+        }
+      };
+
+      function csvEscape(value) {
+        var s = value == null ? '' : String(value);
+        if (/[;"\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+        return s;
+      }
+
+      function fileStamp() {
+        var d = new Date();
+        function p(n) { return String(n).padStart(2, '0'); }
+        return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+      }
+
+      var Exporter = {
+        timer: null,
+        remaining: 0,
+        minutes: function () {
+          var n = Number(el.exportMinutes.value);
+          if (!isFinite(n)) n = 5;
+          n = Math.min(120, Math.max(1, Math.round(n)));
+          el.exportMinutes.value = String(n);
+          return n;
+        },
+        setStatus: function (text) {
+          el.exportStatus.textContent = text;
+        },
+        exportNow: function (automatic) {
+          if (!History.rows.length) {
+            this.setStatus(automatic ? 'Export auto ignoré : historique vide.' : 'Historique vide.');
+            return false;
+          }
+          var lines = ['ID_Piece;Horodatage;Temp_Moule;Statut;Motif_Rebut;Emballe'];
+          for (var i = 0; i < History.rows.length; i += 1) {
+            var row = History.rows[i];
+            lines.push([row.id, row.timestamp, row.temp, row.status, row.motif, row.emballe].map(csvEscape).join(';'));
+          }
+          var csv = '\uFEFF' + lines.join('\r\n');
+          var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+          var url = URL.createObjectURL(blob);
+          var link = document.createElement('a');
+          var name = 'historique_moulage_' + fileStamp() + '.csv';
+          link.href = url;
+          link.download = name;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+          this.setStatus((automatic ? 'Export automatique : ' : 'Export : ') + name);
+          return true;
+        },
+        paintCountdown: function () {
+          if (!el.exportAuto.checked) {
+            el.exportCountdown.textContent = 'Export automatique inactif';
+            return;
+          }
+          var total = Math.max(0, this.remaining);
+          var m = Math.floor(total / 60);
+          var s = total % 60;
+          el.exportCountdown.textContent = 'Prochain export dans ' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        },
+        configure: function () {
+          if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+          }
+          if (!el.exportAuto.checked) {
+            this.paintCountdown();
+            return;
+          }
+          var self = this;
+          this.remaining = this.minutes() * 60;
+          this.paintCountdown();
+          this.timer = setInterval(function () {
+            self.remaining -= 1;
+            if (self.remaining <= 0) {
+              self.exportNow(true);
+              self.remaining = self.minutes() * 60;
+            }
+            self.paintCountdown();
+          }, 1000);
+        }
+      };
+
+      function tempColor(temp) {
+        if (temp > TEMP_LIMIT) return '#ef4444';
+        if (temp >= 200) return '#f59e0b';
+        return '#38bdf8';
+      }
+
+      function partVisual(part) {
+        var fill = '#e2e8f0';
+        var boxOpacity = 0;
+        if (part.status === 'Non-Conforme') fill = '#fb7185';
+        else if (part.phase === 'inspect') fill = '#fbbf24';
+        else if (part.phase === 'pack') {
+          var t = State.packTime > 0 ? Math.min(1, part.hold / State.packTime) : 1;
+          fill = mixHex('#e2e8f0', '#bbf7d0', t);
+          boxOpacity = t;
+        } else if (part.packed) {
+          fill = '#bbf7d0';
+          boxOpacity = 1;
+        }
+        return { fill: fill, boxOpacity: boxOpacity };
+      }
+
+      function drawMinis(group, count, originX, originY, color) {
+        while (group.firstChild) group.removeChild(group.firstChild);
+        var n = Math.min(count, 12);
+        for (var i = 0; i < n; i += 1) {
+          var rect = svgEl('rect');
+          var col = i % 6;
+          var row = Math.floor(i / 6);
+          rect.setAttribute('x', String(originX + col * 16));
+          rect.setAttribute('y', String(originY + row * 14));
+          rect.setAttribute('width', '12');
+          rect.setAttribute('height', '8');
+          rect.setAttribute('rx', '1');
+          rect.setAttribute('fill', color);
+          group.appendChild(rect);
+        }
+      }
+
+      var Renderer = {
+        init: function () {
+          var period = 32;
+          var count = Math.ceil((Layout.beltRight - Layout.beltLeft) / period) + 2;
+          for (var i = 0; i < count; i += 1) {
+            var stripe = svgEl('rect');
+            stripe.setAttribute('y', '344');
+            stripe.setAttribute('width', '14');
+            stripe.setAttribute('height', '12');
+            stripe.setAttribute('fill', '#334155');
+            el.beltStripes.appendChild(stripe);
+            stripes.push(stripe);
+          }
+          for (var x = Layout.beltLeft + 18; x <= Layout.beltRight - 10; x += 36) {
+            var g = svgEl('g');
+            var cx = x;
+            var cy = 376;
+            g.setAttribute('data-cx', String(cx));
+            g.setAttribute('data-cy', String(cy));
+            var circle = svgEl('circle');
+            circle.setAttribute('cx', String(cx));
+            circle.setAttribute('cy', String(cy));
+            circle.setAttribute('r', '8');
+            circle.setAttribute('fill', '#64748b');
+            circle.setAttribute('stroke', '#334155');
+            var line = svgEl('line');
+            line.setAttribute('x1', String(cx));
+            line.setAttribute('y1', String(cy - 6));
+            line.setAttribute('x2', String(cx));
+            line.setAttribute('y2', String(cy + 6));
+            line.setAttribute('stroke', '#0f172a');
+            line.setAttribute('stroke-width', '2');
+            g.appendChild(circle);
+            g.appendChild(line);
+            el.rollers.appendChild(g);
+            rollers.push(g);
+          }
+        },
+        draw: function () {
+          var ratio = Injector.ratio();
+          var travel = ratio * 54;
+          el.upperMold.setAttribute('transform', 'translate(0 ' + travel.toFixed(1) + ')');
+          el.pressRod.setAttribute('height', String(28 + travel));
+          el.moldState.textContent = Injector.label();
+          el.tempReadout.textContent = State.temp + ' °C';
+          el.tempLed.setAttribute('fill', tempColor(State.temp));
+          var injecting = Injector.active && Injector.t / MOLD_TIME >= 0.28 && Injector.t / MOLD_TIME < 0.62;
+          el.injectGlow.setAttribute('opacity', injecting ? '0.95' : '0.08');
+          el.moldShot.setAttribute('opacity', ratio > 0.65 && !Injector.spawned ? '0.95' : '0');
+
+          var period = 32;
+          var shift = State.beltShift % period;
+          for (var s = 0; s < stripes.length; s += 1) {
+            var sx = Layout.beltLeft + s * period - shift;
+            stripes[s].setAttribute('x', String(sx));
+            var visible = sx >= Layout.beltLeft && sx <= Layout.beltRight - 14;
+            stripes[s].setAttribute('opacity', visible ? '0.95' : '0');
+          }
+          var angle = (State.beltShift * 1.4) % 360;
+          for (var r = 0; r < rollers.length; r += 1) {
+            var cx = rollers[r].getAttribute('data-cx');
+            var cy = rollers[r].getAttribute('data-cy');
+            rollers[r].setAttribute('transform', 'rotate(' + angle.toFixed(1) + ' ' + cx + ' ' + cy + ')');
+          }
+
+          var rodH = Layout.pusherRodH + Pusher.ext * Layout.pusherStroke;
+          el.pusherRod.setAttribute('height', String(rodH));
+          el.pusherPad.setAttribute('y', String(Layout.pusherPadY + Pusher.ext * Layout.pusherStroke));
+
+          var inspecting = false;
+          var packing = false;
+          var packT = 0;
+          for (var i = 0; i < Parts.list.length; i += 1) {
+            var part = Parts.list[i];
+            if (part.phase === 'inspect') inspecting = true;
+            if (part.phase === 'pack') {
+              packing = true;
+              packT = State.packTime > 0 ? Math.min(1, part.hold / State.packTime) : 1;
+            }
+            var visual = partVisual(part);
+            part.node.setAttribute('transform', 'translate(' + part.x.toFixed(1) + ' ' + part.y.toFixed(1) + ')');
+            part.body.setAttribute('fill', visual.fill);
+            part.box.setAttribute('opacity', String(visual.boxOpacity));
+            part.tape.setAttribute('opacity', String(visual.boxOpacity > 0 ? visual.boxOpacity * 0.95 : 0));
+          }
+
+          el.sensorBeam.setAttribute('opacity', inspecting || State.flash > 0 ? '0.85' : '0.12');
+          if (State.flash > 0 && State.flashKind === 'ko') {
+            el.sensorLed.setAttribute('fill', '#fb7185');
+            el.sensorResult.textContent = 'NON CONFORME';
+            el.sensorResult.setAttribute('fill', '#fb7185');
+          } else if (State.flash > 0 && State.flashKind === 'ok') {
+            el.sensorLed.setAttribute('fill', '#4ade80');
+            el.sensorResult.textContent = 'CONFORME';
+            el.sensorResult.setAttribute('fill', '#4ade80');
+          } else if (inspecting) {
+            el.sensorLed.setAttribute('fill', '#facc15');
+            el.sensorResult.textContent = 'CONTRÔLE';
+            el.sensorResult.setAttribute('fill', '#fde68a');
+          } else {
+            el.sensorLed.setAttribute('fill', '#166534');
+            el.sensorResult.textContent = '';
+          }
+
+          el.presenceLed.setAttribute('fill', State.presenceHold > 0 ? '#38bdf8' : '#1e3a8a');
+          el.presenceBeam.setAttribute('opacity', State.presenceHold > 0 ? '0.9' : '0.12');
+          el.countLed.setAttribute('fill', State.countHold > 0 ? '#4ade80' : '#14532d');
+          el.countBeam.setAttribute('opacity', State.countHold > 0 ? '0.9' : '0.12');
+
+          el.packLabel.setAttribute('visibility', packing ? 'visible' : 'hidden');
+          el.sealBar.setAttribute('y', String(292 + packT * 18));
+          el.packStation.classList.toggle('is-bottleneck', State.bottleneck);
+
+          el.scrapCount.textContent = String(State.inScrap);
+          el.okCount.textContent = String(State.inOk);
+          if (State.shownScrap !== State.inScrap) {
+            drawMinis(el.scrapMinis, State.inScrap, 500, 456, '#fb7185');
+            State.shownScrap = State.inScrap;
+          }
+          if (State.shownOk !== State.inOk) {
+            drawMinis(el.okMinis, State.inOk, 1248, 448, '#4ade80');
+            State.shownOk = State.inOk;
+          }
+
+          var challengeHud = Challenge.active || !!Challenge.result;
+          var packedNow = challengeHud ? Challenge.packed : State.packed;
+          var progress = Math.min(1, packedNow / CHALLENGE_TARGET);
+          el.challengeTime.textContent = challengeHud ? clockText(Challenge.remaining) : clockText(State.openTime, true);
+          el.challengeBar.setAttribute('width', String(344 * progress));
+          el.challengeCount.textContent = packedNow + ' / ' + CHALLENGE_TARGET;
+          var timerColor = '#64748b';
+          if (Challenge.result === 'success') timerColor = '#4ade80';
+          else if (Challenge.result === 'fail') timerColor = '#f87171';
+          else if (Challenge.active || State.session) timerColor = '#f8fafc';
+          el.challengeTime.setAttribute('fill', timerColor);
+          el.challengeCount.setAttribute('fill', Challenge.active || Challenge.result || State.session ? '#a7f3d0' : '#64748b');
+
+          if (Challenge.result) {
+            var ok = Challenge.result === 'success';
+            el.challengeBanner.setAttribute('visibility', 'visible');
+            el.challengeBannerBg.setAttribute('fill', ok ? '#022c22' : '#450a0a');
+            el.challengeResult.textContent = ok ? 'Succès' : 'Échec';
+            el.challengeResult.setAttribute('fill', ok ? '#4ade80' : '#f87171');
+            el.challengeSub.textContent = ok ? '100 pièces conformes emballées' : 'Objectif non atteint';
+            el.challengeSub.setAttribute('fill', ok ? '#d1fae5' : '#fecdd3');
+          } else {
+            el.challengeBanner.setAttribute('visibility', 'hidden');
+          }
+        },
+        syncHud: function () {
+          el.badge.textContent = BADGE[State.status] || BADGE.ready;
+          el.badge.setAttribute('data-status', State.status);
+          el.message.textContent = State.message;
+          el.chipRunning.classList.toggle('is-on', State.status === 'running');
+          el.chipStopped.classList.toggle('is-on', State.status === 'stopped');
+          el.chipOverheat.classList.toggle('is-on', State.status === 'overheat');
+          el.chipQuality.classList.toggle('is-on', State.status === 'quality_stop');
+          el.chipEmergency.classList.toggle('is-on', State.status === 'emergency');
+
+          el.outSpeed.textContent = String(State.speed);
+          el.outCadence.textContent = fmtNum(State.cadence);
+          el.outPack.textContent = fmtNum(State.packTime);
+          el.outControl.textContent = fmtNum(State.controlTime);
+          el.outDefect.textContent = String(State.defectRate);
+          el.outTemp.textContent = String(State.temp);
+          el.tempHint.classList.toggle('is-hot-text', State.temp > TEMP_LIMIT);
+
+          var kpi = kpis();
+          el.statMolded.textContent = String(State.molded);
+          el.statWait.textContent = String(State.waiting);
+          el.statPacked.textContent = String(State.packed);
+          el.statScrap.textContent = String(State.scrap);
+          el.statDefect.textContent = fmtPct(kpi.defect);
+          el.statOee.textContent = fmtPct(kpi.oee);
+          el.statStreak.textContent = State.consecutive + ' / ' + DEFECT_LIMIT;
+
+          var alarm = kpi.defect > 30;
+          el.dashboard.classList.toggle('is-alarm', alarm);
+          el.defectAlert.classList.toggle('hidden', !alarm);
+
+          el.btnStart.disabled = State.status === 'running' || State.latch || State.status === 'overheat' || State.temp > TEMP_LIMIT;
+          el.btnStop.disabled = State.status !== 'running';
+          el.btnEmergency.disabled = State.status !== 'running';
+          el.btnChallenge.disabled = Challenge.active;
+          el.btnChallenge.textContent = Challenge.active ? 'Défi en cours' : (Challenge.result ? 'Relancer le défi' : 'Activer le mode Défi');
+
+          if (State.historyDirty) {
+            renderTable();
+            State.historyDirty = false;
+          }
+        }
+      };
+
+      function renderTable() {
+        var body = el.historyBody;
+        while (body.firstChild) body.removeChild(body.firstChild);
+        if (!History.rows.length) {
+          var empty = document.createElement('tr');
+          empty.className = 'row-empty';
+          var cell = document.createElement('td');
+          cell.colSpan = 6;
+          cell.textContent = 'Aucune pièce inspectée.';
+          empty.appendChild(cell);
+          body.appendChild(empty);
+          return;
+        }
+        for (var i = History.rows.length - 1; i >= 0; i -= 1) {
+          var row = History.rows[i];
+          var tr = document.createElement('tr');
+          tr.className = row.status === 'Conforme' ? 'row-ok' : 'row-ko';
+          [row.id, row.timestamp, row.temp, row.status, row.motif, row.emballe].forEach(function (value) {
+            var td = document.createElement('td');
+            td.textContent = value == null ? '' : String(value);
+            tr.appendChild(td);
+          });
+          body.appendChild(tr);
+        }
+      }
+
+      function bootDom() {
+        el.dashboard = requireEl('dashboard');
+        el.defectAlert = requireEl('defect-alert');
+        el.badge = requireEl('badge-status');
+        el.message = requireEl('line-message');
+        el.chipRunning = requireEl('chip-running');
+        el.chipStopped = requireEl('chip-stopped');
+        el.chipOverheat = requireEl('chip-overheat');
+        el.chipQuality = requireEl('chip-quality');
+        el.chipEmergency = requireEl('chip-emergency');
+        el.btnStart = requireEl('btn-start');
+        el.btnStop = requireEl('btn-stop');
+        el.btnEmergency = requireEl('btn-emergency');
+        el.btnReset = requireEl('btn-reset');
+        el.btnChallenge = requireEl('btn-challenge');
+        el.sliderSpeed = requireEl('slider-speed');
+        el.sliderCadence = requireEl('slider-cadence');
+        el.sliderPack = requireEl('slider-pack');
+        el.sliderControl = requireEl('slider-control');
+        el.sliderDefect = requireEl('slider-defect');
+        el.sliderTemp = requireEl('slider-temp');
+        el.outSpeed = requireEl('out-speed');
+        el.outCadence = requireEl('out-cadence');
+        el.outPack = requireEl('out-pack');
+        el.outControl = requireEl('out-control');
+        el.outDefect = requireEl('out-defect');
+        el.outTemp = requireEl('out-temp');
+        el.tempHint = requireEl('temp-hint');
+        el.statMolded = requireEl('stat-molded');
+        el.statWait = requireEl('stat-wait');
+        el.statPacked = requireEl('stat-packed');
+        el.statScrap = requireEl('stat-scrap');
+        el.statDefect = requireEl('stat-defect');
+        el.statOee = requireEl('stat-oee');
+        el.statStreak = requireEl('stat-streak');
+        el.historyBody = requireEl('history-body');
+        el.exportMinutes = requireEl('export-minutes');
+        el.exportAuto = requireEl('export-auto');
+        el.exportCountdown = requireEl('export-countdown');
+        el.exportStatus = requireEl('export-status');
+        el.wsUrl = requireEl('ws-url');
+        el.btnWs = requireEl('btn-ws');
+        el.wsDot = requireEl('ws-dot');
+        el.wsState = requireEl('ws-state');
+        el.partsLayer = requireEl('parts-layer');
+        el.beltStripes = requireEl('belt-stripes');
+        el.rollers = requireEl('rollers');
+        el.upperMold = requireEl('upper-mold');
+        el.pressRod = requireEl('press-rod');
+        el.moldState = requireEl('mold-state');
+        el.tempReadout = requireEl('temp-readout');
+        el.tempLed = requireEl('temp-led');
+        el.injectGlow = requireEl('inject-glow');
+        el.moldShot = requireEl('mold-shot');
+        el.sensorLed = requireEl('sensor-led');
+        el.sensorBeam = requireEl('sensor-beam');
+        el.sensorResult = requireEl('sensor-result');
+        el.presenceLed = requireEl('presence-led');
+        el.presenceBeam = requireEl('presence-beam');
+        el.countLed = requireEl('count-led');
+        el.countBeam = requireEl('count-beam');
+        el.pusherRod = requireEl('pusher-rod');
+        el.pusherPad = requireEl('pusher-pad');
+        el.packStation = requireEl('pack-station');
+        el.packLabel = requireEl('pack-label');
+        el.sealBar = requireEl('seal-bar');
+        el.scrapCount = requireEl('scrap-count');
+        el.okCount = requireEl('ok-count');
+        el.scrapMinis = requireEl('scrap-minis');
+        el.okMinis = requireEl('ok-minis');
+        el.challengeTime = requireEl('challenge-time');
+        el.challengeBar = requireEl('challenge-bar');
+        el.challengeCount = requireEl('challenge-count');
+        el.challengeBanner = requireEl('challenge-banner');
+        el.challengeBannerBg = requireEl('challenge-banner-bg');
+        el.challengeResult = requireEl('challenge-result');
+        el.challengeSub = requireEl('challenge-sub');
+      }
+
+      function setCadence(val) {
+        var n = clamp(val, 1, 15);
+        if (n == null) return;
+        State.cadence = Math.round(n);
+        el.sliderCadence.value = String(State.cadence);
+      }
+
+      function setPackTime(val) {
+        var n = clamp(val, 1, 10);
+        if (n == null) return;
+        State.packTime = Math.round(n * 2) / 2;
+        el.sliderPack.value = String(State.packTime);
+      }
+
+      function setControlTime(val) {
+        var n = clamp(val, 0.5, 8);
+        if (n == null) return;
+        State.controlTime = Math.round(n * 2) / 2;
+        el.sliderControl.value = String(State.controlTime);
+      }
+
+      function setDefectRate(val) {
+        var n = clamp(val, 0, 100);
+        if (n == null) return;
+        State.defectRate = Math.round(n);
+        el.sliderDefect.value = String(State.defectRate);
+      }
+
+      function resetLine() {
+        Parts.clear();
+        Pusher.reset();
+        History.clear();
+        Injector.reset();
+        Challenge.reset();
+        State.consecutive = 0;
+        State.latch = false;
+        State.session = false;
+        State.molded = 0;
+        State.conform = 0;
+        State.scrap = 0;
+        State.packed = 0;
+        State.inspected = 0;
+        State.inOk = 0;
+        State.inScrap = 0;
+        State.waiting = 0;
+        State.bottleneck = false;
+        State.openTime = 0;
+        State.runTime = 0;
+        State.beltShift = 0;
+        State.flash = 0;
+        State.flashKind = '';
+        State.presenceHold = 0;
+        State.countHold = 0;
+        State.shownScrap = -1;
+        State.shownOk = -1;
+        Overheat.clear();
+        if (State.temp > TEMP_LIMIT) setStatus('overheat', 'surchauffe');
+        else setStatus('ready', 'réinitialisation');
+      }
+
+      function emergencyStop() {
+        State.latch = true;
+        setStatus('emergency', 'urgence');
+      }
+
+      window.startLine = function () {
+        if (State.latch || State.status === 'overheat') {
+          State.message = MESSAGES.verrou;
+          return;
+        }
+        if (State.temp > TEMP_LIMIT) {
+          setStatus('overheat', 'surchauffe');
+          return;
+        }
+        if (State.status === 'running') return;
+        var reprise = State.session;
+        if (!State.session) {
+          State.session = true;
+          State.openTime = 0;
+          State.runTime = 0;
+        }
+        Injector.cooldown = State.cadence;
+        if (!Overheat.armed) Overheat.arm();
+        setStatus('running', reprise ? 'reprise' : 'démarrage');
+      };
+
+      window.stopLine = function () {
+        if (State.status === 'running') setStatus('stopped', 'arrêt');
+      };
+
+      window.setSpeed = function (val) {
+        var n = clamp(val, 1, 100);
+        if (n == null) return;
+        State.speed = Math.round(n);
+        el.sliderSpeed.value = String(State.speed);
+        publishStatus(true);
+      };
+
+      window.setTemp = function (val) {
+        var n = clamp(val, 150, 250);
+        if (n == null) return;
+        State.temp = Math.round(n);
+        el.sliderTemp.value = String(State.temp);
+        if (State.temp > TEMP_LIMIT) {
+          if (State.status === 'running' || State.status === 'ready' || State.status === 'stopped') {
+            setStatus('overheat', 'surchauffe');
+          } else {
+            publishStatus(true);
+          }
+        } else {
+          publishStatus(true);
+        }
+      };
+
+      window.resetSecurity = function () {
+        State.latch = false;
+        State.consecutive = 0;
+        if (State.temp > TEMP_LIMIT) {
+          setStatus('overheat', 'surchauffe');
+          return;
+        }
+        if (State.status === 'emergency' || State.status === 'quality_stop' || State.status === 'overheat') {
+          setStatus(State.session ? 'stopped' : 'ready', 'acquittement');
+          return;
+        }
+        publishStatus(true);
+      };
+
+      window.connectWebSocket = function (url) {
+        var target = (url && String(url).trim()) || (el.wsUrl.value || '').trim() || DEFAULT_WS;
+        window.disconnectWebSocket();
+        el.wsUrl.value = target;
+        setWsMode('connecting');
+        var socket;
+        try {
+          socket = new WebSocket(target);
+        } catch (err) {
+          setWsMode('error');
+          return;
+        }
+        Ws.socket = socket;
+        socket.onopen = function () {
+          if (Ws.socket !== socket) return;
+          setWsMode('open');
+          publishStatus(true);
+        };
+        socket.onerror = function () {
+          if (Ws.socket === socket) setWsMode('error');
+        };
+        socket.onclose = function () {
+          if (Ws.socket === socket) {
+            Ws.socket = null;
+            setWsMode('closed');
+          }
+        };
+        socket.onmessage = function (ev) {
+          Ws.handle(ev.data);
+        };
+      };
+
+      window.disconnectWebSocket = function () {
+        var socket = Ws.socket;
+        Ws.socket = null;
+        if (!socket) {
+          setWsMode('closed');
+          return;
+        }
+        socket.onopen = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        socket.onmessage = null;
+        try { socket.close(); } catch (err) { /* déjà fermée */ }
+        setWsMode('closed');
+      };
+
+      function boot() {
+        bootDom();
+        Renderer.init();
+        el.btnStart.addEventListener('click', function () { window.startLine(); });
+        el.btnStop.addEventListener('click', function () { window.stopLine(); });
+        el.btnEmergency.addEventListener('click', emergencyStop);
+        el.btnReset.addEventListener('click', resetLine);
+        el.btnChallenge.addEventListener('click', function () {
+          if (Challenge.active) return;
+          Challenge.start();
+          window.startLine();
+        });
+        el.sliderSpeed.addEventListener('input', function () { window.setSpeed(el.sliderSpeed.value); });
+        el.sliderCadence.addEventListener('input', function () { setCadence(el.sliderCadence.value); });
+        el.sliderPack.addEventListener('input', function () { setPackTime(el.sliderPack.value); });
+        el.sliderControl.addEventListener('input', function () { setControlTime(el.sliderControl.value); });
+        el.sliderDefect.addEventListener('input', function () { setDefectRate(el.sliderDefect.value); });
+        el.sliderTemp.addEventListener('input', function () { window.setTemp(el.sliderTemp.value); });
+        requireEl('btn-export').addEventListener('click', function () { Exporter.exportNow(false); });
+        el.exportAuto.addEventListener('change', function () { Exporter.configure(); });
+        el.exportMinutes.addEventListener('change', function () { Exporter.configure(); });
+        el.btnWs.addEventListener('click', function () {
+          var open = Ws.socket && (Ws.socket.readyState === WebSocket.OPEN || Ws.socket.readyState === WebSocket.CONNECTING);
+          if (open) window.disconnectWebSocket();
+          else window.connectWebSocket(el.wsUrl.value.trim());
+        });
+        Renderer.draw();
+        Renderer.syncHud();
+        Exporter.paintCountdown();
+
+        var last = performance.now();
+        var rafId = 0;
+        var timerId = 0;
+
+        function step(now) {
+          var acc = Math.min(1, (now - last) / 1000);
+          last = now;
+          while (acc > 0.0001) {
+            var dt = Math.min(0.05, acc);
+            Simulation.tick(dt);
+            acc -= dt;
+          }
+          Renderer.draw();
+          Renderer.syncHud();
+        }
+
+        function onFrame(now) {
+          step(now);
+          rafId = requestAnimationFrame(onFrame);
+        }
+
+        function engage() {
+          if (document.hidden) {
+            if (rafId) {
+              cancelAnimationFrame(rafId);
+              rafId = 0;
+            }
+            if (!timerId) timerId = setInterval(function () { step(performance.now()); }, 200);
+          } else {
+            if (timerId) {
+              clearInterval(timerId);
+              timerId = 0;
+            }
+            if (!rafId) rafId = requestAnimationFrame(onFrame);
+          }
+          last = performance.now();
+        }
+
+        document.addEventListener('visibilitychange', engage);
+        engage();
+      }
+
+      boot();
+    })();
+  </script>
+</body>
+</html>
