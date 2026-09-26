@@ -4,7 +4,7 @@
         "type": "tab",
         "label": "Moulage V2",
         "disabled": false,
-        "info": "Supervision de SimulationMoulageAuto_V2.html via WebSocket /ws/moulage.\n\nDésactiver l'onglet V1 avant déploiement : un seul listener est autorisé sur ce path.\nPrérequis : node-red-dashboard.\nJournal : C:/Master/M2/IOT/TP/Production/moulage_production_v2.csv"
+        "info": "Supervision de SimulationMoulageAuto_V2.html via WebSocket /ws/moulage.\n\nUn seul listener est autorisé sur ce path.\nPrérequis : node-red-dashboard.\nJournal : C:/Master/M2/IOT/TP/Production/moulage_production_v2.csv"
     },
     {
         "id": "c200000000000001",
@@ -70,7 +70,7 @@
         "type": "comment",
         "z": "f20b000000000001",
         "name": "Raccordement SimulationMoulageAuto_V2",
-        "info": "Dans la page, Connecter vers ws://127.0.0.1:1880/ws/moulage.\n\nEntrée : { type: moulage:piece | moulage:status, payload }.\nSortie : { action: START|STOP|RESET|SET_SPEED|SET_TEMP, value }.\n\nLa V2 traite START, STOP, RESET et SET_SPEED.\nSET_TEMP est émis par le slider ; la page ne l'applique que si Ws.handle appelle window.setTemp.\n\nLe statut filaire « Arrêt Sécurité » couvre aussi l'arrêt normal : le badge passe au rouge clignotant, comme pour Surchauffe et Arrêt Sécurité Qualité.\n\nJournal : C:/Master/M2/IOT/TP/Production/moulage_production_v2.csv\nPrérequis : node-red-dashboard. Désactiver le flux V1 (même path /ws/moulage).",
+        "info": "Dans la page, Connecter vers ws://127.0.0.1:1880/ws/moulage.\n\nEntrée : { type: moulage:piece | moulage:status, payload }.\nSortie : { action: START|STOP|RESET|SET_SPEED|SET_TEMP, value }.\n\nLa V2 traite START, STOP, RESET et SET_SPEED.\nSET_TEMP est émis par le slider ; la page ne l'applique que si Ws.handle appelle window.setTemp.\n\nLe statut filaire « Arrêt Sécurité » couvre aussi l'arrêt normal : le badge passe au rouge clignotant, comme pour Surchauffe et Arrêt Sécurité Qualité.\n\nJournal : C:/Master/M2/IOT/TP/Production/moulage_production_v2.csv\nPrérequis : node-red-dashboard. Un seul listener sur /ws/moulage.",
         "x": 280,
         "y": 40,
         "wires": []
@@ -724,6 +724,96 @@
         "client": "",
         "x": 720,
         "y": 560,
+        "wires": []
+    },
+    {
+        "id": "d200000000000022",
+        "type": "ui_template",
+        "z": "f20b000000000001",
+        "group": "d200000000000005",
+        "name": "Télécharger le CSV",
+        "order": 6,
+        "width": 6,
+        "height": 1,
+        "format": "<div style=\"padding:6px 0\"><a href=\"/moulage/production.csv\" style=\"display:inline-block;background:#0284c7;color:#fff;text-decoration:none;padding:8px 14px;border-radius:4px;font-weight:600;\">Télécharger le CSV</a></div>",
+        "storeOutMessages": false,
+        "fwdInMessages": false,
+        "resendOnRefresh": false,
+        "templateScope": "local",
+        "className": "",
+        "x": 190,
+        "y": 720,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c20000000000000d",
+        "type": "http in",
+        "z": "f20b000000000001",
+        "name": "GET CSV production",
+        "url": "/moulage/production.csv",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 200,
+        "y": 800,
+        "wires": [
+            [
+                "c20000000000000e"
+            ]
+        ]
+    },
+    {
+        "id": "c20000000000000e",
+        "type": "file in",
+        "z": "f20b000000000001",
+        "name": "Lire le journal CSV",
+        "filename": "C:/Master/M2/IOT/TP/Production/moulage_production_v2.csv",
+        "filenameType": "str",
+        "format": "utf8",
+        "chunk": false,
+        "sendError": true,
+        "encoding": "none",
+        "allProps": false,
+        "x": 460,
+        "y": 800,
+        "wires": [
+            [
+                "c20000000000000f"
+            ]
+        ]
+    },
+    {
+        "id": "c20000000000000f",
+        "type": "function",
+        "z": "f20b000000000001",
+        "name": "Préparer le téléchargement",
+        "func": "const header = \"ID_Piece;Horodatage;Temp_Moule;Statut;Motif_Rebut;Emballe\\r\\n\";\nif (msg.error || msg.payload == null || msg.payload === \"\") {\n    msg.payload = header;\n} else if (typeof msg.payload !== \"string\") {\n    msg.payload = String(msg.payload);\n}\nif (!msg.payload.startsWith(\"\\uFEFF\")) msg.payload = \"\\uFEFF\" + msg.payload;\nmsg.headers = {\n    \"Content-Type\": \"text/csv; charset=utf-8\",\n    \"Content-Disposition\": \"attachment; filename=\\\"moulage_production_v2.csv\\\"\"\n};\ndelete msg.error;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 720,
+        "y": 800,
+        "wires": [
+            [
+                "c200000000000010"
+            ]
+        ]
+    },
+    {
+        "id": "c200000000000010",
+        "type": "http response",
+        "z": "f20b000000000001",
+        "name": "Téléchargement CSV",
+        "statusCode": "",
+        "headers": {},
+        "x": 960,
+        "y": 800,
         "wires": []
     }
 ]
