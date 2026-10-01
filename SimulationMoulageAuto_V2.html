@@ -434,11 +434,11 @@
     </section>
 
     <section class="block">
-      <h2>WebSocket Node-RED</h2>
-      <p class="sub">La ligne émet moulage:piece et moulage:status.</p>
+      <h2>MQTT Mosquitto</h2>
+      <p class="sub">La ligne publie moulage/piece et moulage/status, et s'abonne à moulage/cmd.</p>
       <div class="ws-row">
         <span id="ws-dot" class="dot" data-ws="closed" aria-hidden="true"></span>
-        <input id="ws-url" type="text" spellcheck="false" value="ws://127.0.0.1:1880/ws/moulage" />
+        <input id="ws-url" type="text" spellcheck="false" value="ws://127.0.0.1:9001" />
         <button id="btn-ws" type="button" class="line">Connecter</button>
       </div>
       <p id="ws-state">Déconnecté</p>
@@ -449,15 +449,15 @@ window.stopLine()
 window.setSpeed(val)       // 1 à 100
 window.resetSecurity()     // acquitte urgence / qualité, conserve l'historique
 window.setTemp(val)        // 150 à 250
-window.connectWebSocket(url)  // défaut ws://127.0.0.1:1880/ws/moulage
+window.connectMqtt(url)  // défaut ws://127.0.0.1:9001
 
-Événement pièce :
-{ "type": "moulage:piece", "payload": { "id", "timestamp", "status", "temp", "packed", "totalCount", "conformeCount", "defectTotal", "defectRate" } }
+Publication pièce, topic moulage/piece :
+{ "id", "timestamp", "status", "temp", "packed", "totalCount", "conformeCount", "defectTotal", "defectRate" }
 
-Événement statut :
-{ "type": "moulage:status", "payload": { "status": "En Marche|Surchauffe|Arrêt Sécurité", "temp", "speed", "defectStreak", "bottleneck", "challengeActive" } }
+Publication statut, topic moulage/status :
+{ "status": "En Marche|Surchauffe|Arrêt Sécurité", "temp", "speed", "defectStreak", "bottleneck", "challengeActive" }
 
-Commande entrante :
+Commande reçue, topic moulage/cmd :
 { "action": "START" }
 { "action": "STOP" }
 { "action": "RESET" }
@@ -474,6 +474,7 @@ Commande entrante :
       if (n) n.textContent = "La scène 3D n'a pas pu se charger. Vérifiez la connexion, puis rechargez la page.";
     }, 8000);
   </script>
+  <script src="https://unpkg.com/mqtt@5.10.3/dist/mqtt.min.js"></script>
   <script type="module">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -484,7 +485,7 @@ Commande entrante :
     const MOLD_TIME = 0.9;
     const CHALLENGE_SECONDS = 600;
     const CHALLENGE_TARGET = 100;
-    const DEFAULT_WS = 'ws://127.0.0.1:1880/ws/moulage';
+    const DEFAULT_BROKER = 'ws://127.0.0.1:9001';
     const OVERHEAT_WINDOW = 600;
     const SPAN = 10.6;
     const SRC_SPAN = 1156 - 218;
@@ -660,7 +661,7 @@ Commande entrante :
       emit(type, payload) {
         const detail = JSON.parse(JSON.stringify(payload));
         window.dispatchEvent(new CustomEvent(type, { detail: detail }));
-        Ws.forward(type, detail);
+        Mqtt.forward(type, detail);
       }
     };
 
@@ -725,11 +726,12 @@ Commande entrante :
       }
     };
 
-    const Ws = {
-      socket: null,
+    const Mqtt = {
+      client: null,
       forward(type, payload) {
-        if (!this.socket || this.socket.readyState !== 1) return;
-        try { this.socket.send(JSON.stringify({ type: type, payload: payload })); } catch (err) { /* fermeture */ }
+        if (!this.client || !this.client.connected) return;
+        const topic = type === 'moulage:piece' ? 'moulage/piece' : 'moulage/status';
+        try { this.client.publish(topic, JSON.stringify(payload)); } catch (err) { /* fermeture */ }
       },
       handle(raw) {
         let data = raw;
@@ -2303,46 +2305,46 @@ Commande entrante :
       publishStatus(true);
     };
 
-    window.connectWebSocket = function (url) {
-      const target = (url && String(url).trim()) || (el.wsUrl.value || '').trim() || DEFAULT_WS;
-      window.disconnectWebSocket();
+    window.connectMqtt = function (url) {
+      const target = (url && String(url).trim()) || (el.wsUrl.value || '').trim() || DEFAULT_BROKER;
+      window.disconnectMqtt();
       el.wsUrl.value = target;
       setWsMode('connecting');
-      let socket;
-      try { socket = new WebSocket(target); } catch (err) {
+      if (!window.mqtt) {
         setWsMode('error');
         return;
       }
-      Ws.socket = socket;
-      socket.onopen = function () {
-        if (Ws.socket !== socket) return;
+      const client = window.mqtt.connect(target, { reconnectPeriod: 2000 });
+      Mqtt.client = client;
+      client.on('connect', function () {
+        if (Mqtt.client !== client) return;
+        client.subscribe('moulage/cmd');
         setWsMode('open');
         publishStatus(true);
-      };
-      socket.onerror = function () {
-        if (Ws.socket === socket) setWsMode('error');
-      };
-      socket.onclose = function () {
-        if (Ws.socket === socket) {
-          Ws.socket = null;
+      });
+      client.on('message', function (topic, buf) {
+        if (topic !== 'moulage/cmd') return;
+        Mqtt.handle(buf.toString());
+      });
+      client.on('error', function () {
+        if (Mqtt.client === client) setWsMode('error');
+      });
+      client.on('close', function () {
+        if (Mqtt.client === client) {
+          Mqtt.client = null;
           setWsMode('closed');
         }
-      };
-      socket.onmessage = function (ev) { Ws.handle(ev.data); };
+      });
     };
 
-    window.disconnectWebSocket = function () {
-      const socket = Ws.socket;
-      Ws.socket = null;
-      if (!socket) {
+    window.disconnectMqtt = function () {
+      const client = Mqtt.client;
+      Mqtt.client = null;
+      if (!client) {
         setWsMode('closed');
         return;
       }
-      socket.onopen = null;
-      socket.onerror = null;
-      socket.onclose = null;
-      socket.onmessage = null;
-      try { socket.close(); } catch (err) { /* déjà fermée */ }
+      try { client.end(true); } catch (err) { /* déjà fermé */ }
       setWsMode('closed');
     };
 
@@ -2379,9 +2381,9 @@ Commande entrante :
       el.exportAuto.addEventListener('change', () => Exporter.configure());
       el.exportMinutes.addEventListener('change', () => Exporter.configure());
       el.btnWs.addEventListener('click', () => {
-        const open = Ws.socket && (Ws.socket.readyState === WebSocket.OPEN || Ws.socket.readyState === WebSocket.CONNECTING);
-        if (open) window.disconnectWebSocket();
-        else window.connectWebSocket(el.wsUrl.value.trim());
+        const open = Mqtt.client && (Mqtt.client.connected || Mqtt.client.reconnecting);
+        if (open) window.disconnectMqtt();
+        else window.connectMqtt(el.wsUrl.value.trim());
       });
       requireEl('pick-close').addEventListener('click', () => { State.selectedId = null; });
       const btnFs = requireEl('btn-fullscreen');
