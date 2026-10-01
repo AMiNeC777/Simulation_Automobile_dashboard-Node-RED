@@ -70,7 +70,7 @@
         "type": "comment",
         "z": "f20b000000000001",
         "name": "Raccordement SimulationMoulageAuto_V2",
-        "info": "Dans la page, Connecter vers ws://127.0.0.1:1880/ws/moulage.\n\nEntrée : { type: moulage:piece | moulage:status, payload }.\nSortie : { action: START|STOP|RESET|SET_SPEED|SET_TEMP, value }.\n\nLa V2 traite START, STOP, RESET et SET_SPEED.\nSET_TEMP est émis par le slider ; la page ne l'applique que si Ws.handle appelle window.setTemp.\n\nLe statut filaire « Arrêt Sécurité » couvre aussi l'arrêt normal : le badge passe au rouge clignotant, comme pour Surchauffe et Arrêt Sécurité Qualité.\n\nJournal : C:/Master/M2/IOT/TP/Production/moulage_production_v2.csv\nPrérequis : node-red-dashboard. Un seul listener sur /ws/moulage.",
+        "info": "Dans la page, Connecter vers ws://127.0.0.1:1880/ws/moulage.\n\nEntrée : { type: moulage:piece | moulage:status, payload }.\nSortie : { action: START|STOP|RESET|SET_SPEED|SET_TEMP, value }.\n\nLa V2 traite START, STOP, RESET, SET_SPEED et SET_TEMP.\n\nLe statut filaire « Arrêt Sécurité » couvre aussi l'arrêt normal : le badge passe au rouge clignotant, comme pour Surchauffe et Arrêt Sécurité Qualité.\n\nJournal : C:/Master/M2/IOT/TP/Production/moulage_production_v2.csv\nPrérequis : node-red-dashboard. Un seul listener sur /ws/moulage.",
         "x": 280,
         "y": 40,
         "wires": []

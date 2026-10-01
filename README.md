@@ -35,6 +35,8 @@ node-red
 7. Ouvrir le dashboard : [http://127.0.0.1:1880/ui](http://127.0.0.1:1880/ui), onglet **Moulage V2**.
 8. Cliquer sur **Démarrer** (sur la page ou sur le dashboard).
 
+La ligne est une scène 3D. Glisser pour tourner, molette pour zoomer, clic droit pour déplacer. Les boutons **Ensemble**, **Presse**, **Contrôle**, **Emballage** et **Stock** (ou les touches 1 à 5) cadrent la machine. Cliquer une station s'en approche, cliquer une pièce affiche son identité, et le champignon rouge sur la presse fait l'arrêt d'urgence.
+
 ## Ce que montre le dashboard
 
 | Zone | Contenu |
@@ -64,11 +66,11 @@ La page reçoit du JSON sur le WebSocket :
 - Vitesse du convoyeur (10 à 100) → `{ "action": "SET_SPEED", "value": 60 }`
 - Température (150 à 250 °C) → `{ "action": "SET_TEMP", "value": 185 }`
 
-La simulation traite `START`, `STOP`, `RESET` et `SET_SPEED`. Le curseur de température du dashboard envoie `SET_TEMP`, mais la page ne l'applique pas encore : la température se règle avec le curseur **Température de la presse** sur la simulation.
+La simulation traite `START`, `STOP`, `RESET`, `SET_SPEED` et `SET_TEMP`. Le curseur de température du dashboard et celui de la page règlent la même consigne.
 
 ## Comportements à observer
 
-- **Mode Défi** (bouton sur la page) : produire 100 pièces conformes emballées en moins de 10 minutes. Le chrono en haut du synoptique compte le temps de session ; pendant le défi, il devient un compte à rebours de 10:00.
+- **Mode Défi** (bouton sur la page) : produire 100 pièces conformes emballées en moins de 10 minutes. Le chrono en haut de la scène compte le temps de session ; pendant le défi, il devient un compte à rebours de 10:00.
 - **Surchauffe aléatoire** : après **Démarrer**, un instant est tiré au hasard dans les 10 minutes de marche. La température passe alors entre 225 et 245 °C, le voyant **Surchauffe** s'allume et la ligne s'arrête. **Arrêter** met ce délai en pause. Pour repartir : baisser la température sous 220 °C, puis **Réinitialiser**.
 - **Alerte qualité** : si le taux de rebut dépasse 30 %, le dashboard affiche **Alerte Qualité Majeure**.
 - **Arrêt qualité** : 3 rebuts consécutifs arrêtent la ligne. Acquitter avec **Réinitialiser Sécurité** sur le dashboard, ou **Réinitialiser** sur la page.
