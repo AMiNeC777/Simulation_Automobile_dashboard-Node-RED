@@ -4,3 +4,6 @@ historique_moulage_*.csv
 # Sujet d'atelier et documents de prompts
 *.pdf
 *.docx
+
+# Notes and lab write-ups
+*.md

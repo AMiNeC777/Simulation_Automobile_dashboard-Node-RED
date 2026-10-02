@@ -726,6 +726,19 @@ Commande reçue, topic moulage/cmd :
       }
     };
 
+    function decodeMqttPayload(raw) {
+      if (typeof raw === 'string') return raw;
+      try {
+        if (raw instanceof ArrayBuffer) return new TextDecoder('utf-8').decode(new Uint8Array(raw));
+        if (ArrayBuffer.isView(raw)) return new TextDecoder('utf-8').decode(raw);
+      } catch (err) { /* payload illisible */ }
+      if (raw && typeof raw.toString === 'function') {
+        const text = raw.toString();
+        if (text && !/^\d+(,\d+)*$/.test(text)) return text;
+      }
+      return '';
+    }
+
     const Mqtt = {
       client: null,
       forward(type, payload) {
@@ -735,16 +748,22 @@ Commande reçue, topic moulage/cmd :
       },
       handle(raw) {
         let data = raw;
-        if (typeof raw === 'string') {
-          try { data = JSON.parse(raw); } catch (err) { return; }
+        if (typeof raw !== 'object' || raw === null || raw instanceof ArrayBuffer || ArrayBuffer.isView(raw)) {
+          const text = decodeMqttPayload(raw);
+          if (!text) return;
+          try { data = JSON.parse(text); } catch (err) { return; }
         }
         if (!data || typeof data !== 'object') return;
+        if (!data.action && data.payload && typeof data.payload === 'object' && data.payload.action) {
+          data = data.payload;
+        }
         const action = String(data.action || '').toUpperCase();
+        const value = data.value != null ? data.value : (data.payload && data.payload.value);
         if (action === 'START') window.startLine();
         else if (action === 'STOP') window.stopLine();
         else if (action === 'RESET') window.resetSecurity();
-        else if (action === 'SET_SPEED') window.setSpeed(data.value);
-        else if (action === 'SET_TEMP') window.setTemp(data.value);
+        else if (action === 'SET_SPEED') window.setSpeed(value);
+        else if (action === 'SET_TEMP') window.setTemp(value);
       }
     };
 
@@ -2314,26 +2333,48 @@ Commande reçue, topic moulage/cmd :
         setWsMode('error');
         return;
       }
-      const client = window.mqtt.connect(target, { reconnectPeriod: 2000 });
+      const api = window.mqtt.connect ? window.mqtt : window.mqtt.default;
+      if (!api || typeof api.connect !== 'function') {
+        setWsMode('error');
+        return;
+      }
+      const client = api.connect(target, {
+        protocolVersion: 4,
+        reconnectPeriod: 2000,
+        connectTimeout: 8000,
+        clean: true,
+        clientId: 'moulage-page-' + Math.random().toString(16).slice(2, 10)
+      });
       Mqtt.client = client;
       client.on('connect', function () {
         if (Mqtt.client !== client) return;
-        client.subscribe('moulage/cmd');
-        setWsMode('open');
-        publishStatus(true);
+        client.subscribe('moulage/cmd', { qos: 0 }, function (err) {
+          if (Mqtt.client !== client) return;
+          if (err) {
+            setWsMode('error');
+            return;
+          }
+          setWsMode('open');
+          publishStatus(true);
+        });
+      });
+      client.on('reconnect', function () {
+        if (Mqtt.client === client) setWsMode('connecting');
       });
       client.on('message', function (topic, buf) {
         if (topic !== 'moulage/cmd') return;
-        Mqtt.handle(buf.toString());
+        Mqtt.handle(buf);
       });
       client.on('error', function () {
-        if (Mqtt.client === client) setWsMode('error');
+        if (Mqtt.client === client && !client.connected) setWsMode('error');
       });
       client.on('close', function () {
-        if (Mqtt.client === client) {
-          Mqtt.client = null;
-          setWsMode('closed');
+        if (Mqtt.client !== client) return;
+        if (client.reconnecting) {
+          setWsMode('connecting');
+          return;
         }
+        setWsMode('closed');
       });
     };
 
